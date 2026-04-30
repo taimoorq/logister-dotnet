@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>true</IsPackable>
+    <PackageId>Logister</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>Taimoor Qureshi</Authors>
+    <Company>Logister</Company>
+    <Description>.NET SDK for sending errors, logs, metrics, transactions, and check-ins to Logister.</Description>
+    <PackageTags>logister;observability;error-tracking;monitoring;dotnet;csharp</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://docs.logister.org/integrations/dotnet/</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/taimoorq/logister-dotnet</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+</Project>

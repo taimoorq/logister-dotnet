@@ -1,0 +1,58 @@
+name: Build and publish
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Build, test, pack, and publish
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore Logister.sln
+
+      - name: Build Logister
+        run: dotnet build src/Logister/Logister.csproj --configuration Release --no-restore -v minimal
+
+      - name: Build Logister.AspNetCore
+        run: dotnet build src/Logister.AspNetCore/Logister.AspNetCore.csproj --configuration Release --no-restore -v minimal
+
+      - name: Run tests
+        run: dotnet run --project tests/Logister.Tests/Logister.Tests.csproj --configuration Release --no-restore
+
+      - name: Pack Logister
+        run: dotnet pack src/Logister/Logister.csproj --configuration Release --no-build --output artifacts/packages
+
+      - name: Pack Logister.AspNetCore
+        run: dotnet pack src/Logister.AspNetCore/Logister.AspNetCore.csproj --configuration Release --no-build --output artifacts/packages
+
+      - name: Upload package artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: logister-dotnet-packages
+          path: artifacts/packages/*.nupkg
+          if-no-files-found: error
+
+      - name: Publish packages to NuGet
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: dotnet nuget push artifacts/packages/*.nupkg --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}

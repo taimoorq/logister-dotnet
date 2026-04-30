@@ -1,0 +1,15 @@
+bin/
+obj/
+TestResults/
+artifacts/
+.vs/
+.vscode/
+coverage/
+*.nupkg
+*.snupkg
+*.user
+*.suo
+.env
+.env.*
+appsettings.*.local.json
+appsettings.*.secrets.json
