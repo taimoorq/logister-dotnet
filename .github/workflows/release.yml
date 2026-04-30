@@ -1,0 +1,78 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish, for example v0.1.0.
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  github-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Verify release version
+        env:
+          TAG_NAME: ${{ github.event.inputs.tag || github.ref_name }}
+        run: bash scripts/verify-release-version.sh "$TAG_NAME"
+
+      - name: Build release notes from changelog
+        env:
+          TAG_NAME: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          title="$(awk -v tag="$TAG_NAME" '
+            $0 ~ "^## " tag "([[:space:]]|-|$)" {
+              sub(/^## /, "")
+              print
+              exit
+            }
+          ' CHANGELOG.md)"
+
+          if [ -z "$title" ]; then
+            echo "::error::Could not find a CHANGELOG.md heading for $TAG_NAME."
+            exit 1
+          fi
+
+          awk -v tag="$TAG_NAME" '
+            $0 ~ "^## " tag "([[:space:]]|-|$)" {capture=1; next}
+            capture && /^## / {exit}
+            capture {print}
+          ' CHANGELOG.md > release-notes.md
+
+          if ! grep -q '[^[:space:]]' release-notes.md; then
+            echo "Release $TAG_NAME" > release-notes.md
+          fi
+
+          echo "RELEASE_TITLE=$title" >> "$GITHUB_ENV"
+
+      - name: Create or update GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release edit "$TAG_NAME" \
+              --title "$RELEASE_TITLE" \
+              --notes-file release-notes.md \
+              --latest
+          else
+            gh release create "$TAG_NAME" \
+              --verify-tag \
+              --title "$RELEASE_TITLE" \
+              --notes-file release-notes.md \
+              --latest
+          fi

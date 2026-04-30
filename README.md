@@ -150,12 +150,24 @@ dotnet pack -c Release
 
 ## Publishing
 
-Packages are built in GitHub Actions for pull requests and pushes to `main`. Pushes to `main` also publish the generated `.nupkg` files to NuGet.org.
+Pull requests and pushes to `main` run CI: restore, build, tests, and package creation. NuGet publishing happens from `v*` release tags so GitHub Releases and NuGet package versions stay aligned.
 
 Repository setup:
 
 - Add a GitHub Actions secret named `NUGET_API_KEY` with permission to publish the `Logister` and `Logister.AspNetCore` packages.
-- Before merging a release to `main`, bump the `<Version>` value in both package project files and update `CHANGELOG.md`.
-- The workflow uses `--skip-duplicate`, so rerunning a workflow for an already-published version will not republish the package.
+- The NuGet package IDs are `Logister` and `Logister.AspNetCore`.
+- The release workflow configuration lives at `config/release.yml`.
 
-The publish workflow lives at `.github/workflows/publish.yml`.
+Release process:
+
+1. Bump the `<Version>` value in both package project files to the next NuGet version.
+2. Add a matching `CHANGELOG.md` section named `## vX.Y.Z - YYYY-MM-DD`.
+3. Merge the change to `main`.
+4. Create and push a matching tag:
+
+```shell
+git tag vX.Y.Z
+git push origin vX.Y.Z
+```
+
+The publish workflow verifies that the tag version matches both `.csproj` package versions before pushing to NuGet. The GitHub release workflow uses the matching changelog section as the release notes. The NuGet push uses `--skip-duplicate`, so rerunning a workflow for an already-published version will not republish the package.

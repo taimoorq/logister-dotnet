@@ -1,15 +1,16 @@
-name: Publish
+name: CI
 
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
+  pull_request:
 
 permissions:
   contents: read
 
 jobs:
-  publish:
+  test:
     runs-on: ubuntu-latest
 
     steps:
@@ -20,9 +21,6 @@ jobs:
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 8.0.x
-
-      - name: Verify release version
-        run: bash scripts/verify-release-version.sh "$GITHUB_REF_NAME"
 
       - name: Restore
         run: dotnet restore Logister.sln
@@ -41,24 +39,3 @@ jobs:
 
       - name: Pack Logister.AspNetCore
         run: dotnet pack src/Logister.AspNetCore/Logister.AspNetCore.csproj --configuration Release --no-build --output artifacts/packages
-
-      - name: Upload package artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: logister-dotnet-packages
-          path: artifacts/packages/*.nupkg
-          if-no-files-found: error
-
-      - name: Publish packages to NuGet
-        env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
-        run: |
-          if [ -z "${NUGET_API_KEY:-}" ]; then
-            echo "::error::Missing NUGET_API_KEY repository secret."
-            exit 1
-          fi
-
-          dotnet nuget push artifacts/packages/*.nupkg \
-            --api-key "$NUGET_API_KEY" \
-            --source https://api.nuget.org/v3/index.json \
-            --skip-duplicate
