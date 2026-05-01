@@ -51,7 +51,9 @@ Add configuration:
     "BaseUrl": "https://your-logister-host.example",
     "Environment": "production",
     "Release": "quriatime@2026.04.30",
-    "CaptureRequestTransactions": true
+    "CaptureRequestTransactions": true,
+    "CaptureRequestHeaders": true,
+    "CaptureRequestCookies": false
   }
 }
 ```
@@ -73,6 +75,8 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddLogister(builder.Configuration, options =>
 {
     options.Client.DefaultContext["service"] = "quriatime-web";
+    options.CaptureRequestCookies = true;
+    options.SensitiveRequestCookieNames.Add("quriatime_auth");
 });
 
 var app = builder.Build();
@@ -82,6 +86,8 @@ app.UseLogisterRequestTransactions();
 
 app.Run();
 ```
+
+Cookie capture is disabled by default because cookie values often contain authentication or session material. When enabled, common ASP.NET Core auth and session cookie names are redacted automatically. Add application-specific cookie names to `SensitiveRequestCookieNames` when you want the cookie name to appear in Logister without storing its value.
 
 ## Direct client
 

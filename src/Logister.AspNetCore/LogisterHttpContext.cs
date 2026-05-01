@@ -16,13 +16,15 @@ internal static class LogisterHttpContext
     public static IDictionary<string, object?> BuildContext(
         HttpContext context,
         LogisterAspNetCoreOptions options,
-        double? durationMs = null)
+        double? durationMs = null,
+        int? statusCode = null)
     {
         var request = context.Request;
         var routeValues = request.RouteValues.ToDictionary(
             pair => pair.Key,
             pair => (object?)pair.Value?.ToString(),
             StringComparer.OrdinalIgnoreCase);
+        var capturedStatusCode = statusCode ?? context.Response.StatusCode;
 
         var requestContext = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
         {
@@ -36,7 +38,7 @@ internal static class LogisterHttpContext
             ["user_agent"] = request.Headers.UserAgent.ToString(),
             ["route"] = routeValues.Count > 0 ? routeValues : null,
             ["endpoint"] = context.GetEndpoint()?.DisplayName,
-            ["status"] = context.Response.StatusCode
+            ["status"] = capturedStatusCode
         };
 
         if (options.CaptureRequestHeaders)
@@ -47,6 +49,14 @@ internal static class LogisterHttpContext
                     header => header.Key,
                     header => (object?)header.Value.ToString(),
                     StringComparer.OrdinalIgnoreCase);
+        }
+
+        if (options.CaptureRequestCookies && request.Cookies.Count > 0)
+        {
+            requestContext["cookies"] = request.Cookies.ToDictionary(
+                cookie => cookie.Key,
+                cookie => (object?)CookieValue(cookie.Key, cookie.Value, options),
+                StringComparer.OrdinalIgnoreCase);
         }
 
         var result = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
@@ -69,6 +79,13 @@ internal static class LogisterHttpContext
         return result
             .Where(pair => pair.Value is not null)
             .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static string CookieValue(string name, string value, LogisterAspNetCoreOptions options)
+    {
+        return options.SensitiveRequestCookieNames.Contains(name)
+            ? options.RedactedCookieValue
+            : value;
     }
 
     private static string BuildDisplayUrl(HttpRequest request)

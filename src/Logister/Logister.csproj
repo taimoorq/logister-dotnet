@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <IsPackable>true</IsPackable>
     <PackageId>Logister</PackageId>
-    <Version>0.1.0</Version>
+    <Version>0.1.1</Version>
     <Authors>Taimoor Qureshi</Authors>
     <Company>Logister</Company>
     <Description>.NET SDK for sending errors, logs, metrics, transactions, and check-ins to Logister.</Description>

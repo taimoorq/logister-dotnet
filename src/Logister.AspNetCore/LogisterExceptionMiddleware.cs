@@ -43,7 +43,10 @@ public sealed class LogisterExceptionMiddleware
                 exception,
                 new CaptureOptions
                 {
-                    Context = LogisterHttpContext.BuildContext(context, _options),
+                    Context = LogisterHttpContext.BuildContext(
+                        context,
+                        _options,
+                        statusCode: ExceptionStatusCode(context)),
                     RequestId = context.TraceIdentifier,
                     TraceId = System.Diagnostics.Activity.Current?.TraceId.ToString(),
                     UserId = context.User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
@@ -54,5 +57,12 @@ public sealed class LogisterExceptionMiddleware
         {
             _logger.LogDebug(logisterError, "Failed to send ASP.NET Core exception to Logister.");
         }
+    }
+
+    private static int ExceptionStatusCode(HttpContext context)
+    {
+        return context.Response.StatusCode >= StatusCodes.Status400BadRequest
+            ? context.Response.StatusCode
+            : StatusCodes.Status500InternalServerError;
     }
 }

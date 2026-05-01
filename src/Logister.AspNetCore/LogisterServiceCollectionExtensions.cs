@@ -64,6 +64,14 @@ public static class LogisterServiceCollectionExtensions
                 options.CaptureRequestHeaders = parsed;
             }
         });
+        SetIfPresent(section, "CaptureRequestCookies", value =>
+        {
+            if (bool.TryParse(value, out var parsed))
+            {
+                options.CaptureRequestCookies = parsed;
+            }
+        });
+        SetIfPresent(section, "RedactedCookieValue", value => options.RedactedCookieValue = value);
         SetIfPresent(section, "CaptureExceptionData", value =>
         {
             if (bool.TryParse(value, out var parsed))

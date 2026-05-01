@@ -10,7 +10,8 @@ var tests = new (string Name, Func<Task> Run)[]
     ("capture exception sends structured .NET context", CaptureExceptionSendsStructuredContext),
     ("capture metric sends metric value and unit", CaptureMetricSendsMetricContext),
     ("check-in uses check-in endpoint", CheckInUsesCheckInEndpoint),
-    ("ASP.NET Core exception middleware reports and rethrows", AspNetCoreExceptionMiddlewareReportsAndRethrows)
+    ("ASP.NET Core exception middleware reports and rethrows", AspNetCoreExceptionMiddlewareReportsAndRethrows),
+    ("ASP.NET Core request cookies are captured only when enabled", AspNetCoreRequestCookiesAreCapturedOnlyWhenEnabled)
 };
 
 var failures = 0;
@@ -118,7 +119,52 @@ static async Task AspNetCoreExceptionMiddlewareReportsAndRethrows()
     var payload = handler.LastJson.RootElement.GetProperty("event");
     AssertEqual("error", payload.GetProperty("event_type").GetString());
     AssertEqual("aspnetcore", payload.GetProperty("context").GetProperty("framework").GetString());
-    AssertEqual("https://app.example.test/approvals", payload.GetProperty("context").GetProperty("request").GetProperty("url").GetString());
+    var request = payload.GetProperty("context").GetProperty("request");
+    AssertEqual("https://app.example.test/approvals", request.GetProperty("url").GetString());
+    AssertEqual(500, request.GetProperty("status").GetInt32());
+}
+
+static async Task AspNetCoreRequestCookiesAreCapturedOnlyWhenEnabled()
+{
+    var defaultHandler = new RecordingHandler();
+    var defaultClient = BuildClient(defaultHandler);
+    var defaultMiddleware = new LogisterExceptionMiddleware(
+        _ => throw new InvalidOperationException("pipeline failed"),
+        defaultClient,
+        new LogisterAspNetCoreOptions(),
+        NullLogger<LogisterExceptionMiddleware>.Instance);
+    var defaultContext = BuildCookieContext();
+
+    await AssertThrowsAsync<InvalidOperationException>(() => defaultMiddleware.InvokeAsync(defaultContext));
+
+    var defaultRequest = defaultHandler.LastJson.RootElement
+        .GetProperty("event")
+        .GetProperty("context")
+        .GetProperty("request");
+    AssertFalse(defaultRequest.TryGetProperty("cookies", out _), "Cookies should not be captured by default.");
+
+    var enabledHandler = new RecordingHandler();
+    var enabledClient = BuildClient(enabledHandler);
+    var enabledOptions = new LogisterAspNetCoreOptions
+    {
+        CaptureRequestCookies = true
+    };
+    var enabledMiddleware = new LogisterExceptionMiddleware(
+        _ => throw new InvalidOperationException("pipeline failed"),
+        enabledClient,
+        enabledOptions,
+        NullLogger<LogisterExceptionMiddleware>.Instance);
+    var enabledContext = BuildCookieContext();
+
+    await AssertThrowsAsync<InvalidOperationException>(() => enabledMiddleware.InvokeAsync(enabledContext));
+
+    var cookies = enabledHandler.LastJson.RootElement
+        .GetProperty("event")
+        .GetProperty("context")
+        .GetProperty("request")
+        .GetProperty("cookies");
+    AssertEqual("dark", cookies.GetProperty("theme").GetString());
+    AssertEqual("[Filtered]", cookies.GetProperty(".AspNetCore.Cookies").GetString());
 }
 
 static LogisterClient BuildClient(RecordingHandler handler)
@@ -151,6 +197,18 @@ static Exception BuildThrownException()
     }
 }
 
+static DefaultHttpContext BuildCookieContext()
+{
+    var context = new DefaultHttpContext();
+    context.Request.Scheme = "https";
+    context.Request.Host = new HostString("app.example.test");
+    context.Request.Path = "/approvals";
+    context.Request.Headers.Cookie = "theme=dark; .AspNetCore.Cookies=secret-session";
+    context.TraceIdentifier = "trace-cookies";
+
+    return context;
+}
+
 static async Task AssertThrowsAsync<TException>(Func<Task> action)
     where TException : Exception
 {
@@ -177,6 +235,14 @@ static void AssertEqual<T>(T expected, T actual)
 static void AssertTrue(bool value, string message)
 {
     if (!value)
+    {
+        throw new InvalidOperationException(message);
+    }
+}
+
+static void AssertFalse(bool value, string message)
+{
+    if (value)
     {
         throw new InvalidOperationException(message);
     }
