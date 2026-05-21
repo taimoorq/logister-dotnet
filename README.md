@@ -124,10 +124,15 @@ await client.CaptureMetricAsync("timesheet.approvals.pending", 7, new MetricOpti
 
 await client.CheckInAsync("nightly-import", "ok", new CheckInOptions
 {
+    Release = "worker@2026.04.30",
     DurationMs = 122.5,
-    ExpectedIntervalSeconds = 3600
+    ExpectedIntervalSeconds = 3600,
+    TraceId = "trace-123",
+    RequestId = "req-123"
 });
 ```
+
+`CaptureOptions` supports per-event `Environment`, `Release`, `TraceId`, `RequestId`, `SessionId`, and `UserId` for errors, logs, metrics, and transactions. `MetricOptions` adds `Unit`, and `CheckInOptions` supports `Release`, `DurationMs`, `ExpectedIntervalSeconds`, `TraceId`, and `RequestId` so monitor records line up with the Logister API.
 
 ## Environment variables
 
@@ -156,7 +161,7 @@ dotnet pack -c Release
 
 ## Publishing
 
-Pull requests and pushes to `main` run CI: restore, build, tests, and package creation. NuGet publishing happens from `v*` release tags so GitHub Releases and NuGet package versions stay aligned.
+Pull requests and pushes to `main` run CI: restore, build, tests, and package creation. A commit or merge alone does not publish to NuGet. NuGet publishing happens from `v*` release tags so GitHub Releases and NuGet package versions stay aligned.
 
 Repository setup:
 

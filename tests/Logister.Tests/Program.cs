@@ -87,13 +87,27 @@ static async Task CheckInUsesCheckInEndpoint()
     var handler = new RecordingHandler();
     using var client = BuildClient(handler);
 
-    await client.CheckInAsync("nightly-import", "ok", new CheckInOptions { DurationMs = 122.5 });
+    await client.CheckInAsync(
+        "nightly-import",
+        "ok",
+        new CheckInOptions
+        {
+            Release = "worker@1.2.3",
+            DurationMs = 122.5,
+            ExpectedIntervalSeconds = 600,
+            TraceId = "trace-123",
+            RequestId = "req-123"
+        });
 
     AssertEqual("https://logister.test/api/v1/check_ins", handler.LastRequestUri?.ToString());
     var payload = handler.LastJson.RootElement.GetProperty("check_in");
     AssertEqual("nightly-import", payload.GetProperty("slug").GetString());
     AssertEqual("ok", payload.GetProperty("status").GetString());
+    AssertEqual("worker@1.2.3", payload.GetProperty("release").GetString());
     AssertEqual(122.5, payload.GetProperty("duration_ms").GetDouble());
+    AssertEqual(600, payload.GetProperty("expected_interval_seconds").GetInt32());
+    AssertEqual("trace-123", payload.GetProperty("trace_id").GetString());
+    AssertEqual("req-123", payload.GetProperty("request_id").GetString());
 }
 
 static async Task AspNetCoreExceptionMiddlewareReportsAndRethrows()

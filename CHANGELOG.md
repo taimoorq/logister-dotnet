@@ -2,6 +2,11 @@
 
 All notable changes to `logister-dotnet` will be documented in this file.
 
+## v0.1.2 - 2026-05-21
+
+- Added top-level `release` to .NET check-in payloads so monitor records match the Logister API contract.
+- Covered check-in release, expected interval, trace ID, and request ID fields in SDK tests.
+
 ## v0.1.1 - 2026-05-01
 
 This release improves the ASP.NET Core error payloads that power Logister's .NET inbox detail view. Exception reports now show a more accurate failed-request status, and teams can opt in to cookie context while keeping common authentication and session cookies redacted by default.
