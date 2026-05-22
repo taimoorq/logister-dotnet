@@ -9,8 +9,10 @@ var tests = new (string Name, Func<Task> Run)[]
 {
     ("capture exception sends structured .NET context", CaptureExceptionSendsStructuredContext),
     ("capture metric sends metric value and unit", CaptureMetricSendsMetricContext),
+    ("capture span sends trace timing payload", CaptureSpanSendsTraceTimingPayload),
     ("check-in uses check-in endpoint", CheckInUsesCheckInEndpoint),
     ("ASP.NET Core exception middleware reports and rethrows", AspNetCoreExceptionMiddlewareReportsAndRethrows),
+    ("ASP.NET Core request middleware can capture spans", AspNetCoreRequestMiddlewareCanCaptureSpans),
     ("ASP.NET Core request cookies are captured only when enabled", AspNetCoreRequestCookiesAreCapturedOnlyWhenEnabled)
 };
 
@@ -82,6 +84,42 @@ static async Task CaptureMetricSendsMetricContext()
     AssertEqual("count", payload.GetProperty("context").GetProperty("metric").GetProperty("unit").GetString());
 }
 
+static async Task CaptureSpanSendsTraceTimingPayload()
+{
+    var handler = new RecordingHandler();
+    using var client = BuildClient(handler);
+
+    await client.CaptureSpanAsync(
+        "GET /checkout",
+        245.7,
+        new SpanOptions
+        {
+            Kind = "server",
+            Status = "ok",
+            TraceId = "trace-123",
+            RequestId = "req-123",
+            SpanId = "span-root",
+            StartedAt = DateTimeOffset.Parse("2026-05-22T12:00:00Z"),
+            Context = new Dictionary<string, object?>
+            {
+                ["route"] = "GET /checkout"
+            }
+        });
+
+    var payload = handler.LastJson.RootElement.GetProperty("event");
+    AssertEqual("span", payload.GetProperty("event_type").GetString());
+    AssertEqual("GET /checkout", payload.GetProperty("message").GetString());
+    AssertEqual("GET /checkout", payload.GetProperty("name").GetString());
+    AssertEqual(245.7, payload.GetProperty("duration_ms").GetDouble());
+    AssertEqual("trace-123", payload.GetProperty("trace_id").GetString());
+    AssertEqual("req-123", payload.GetProperty("request_id").GetString());
+    AssertEqual("span-root", payload.GetProperty("span_id").GetString());
+    AssertEqual("server", payload.GetProperty("kind").GetString());
+    AssertEqual("ok", payload.GetProperty("status").GetString());
+    AssertEqual("server", payload.GetProperty("context").GetProperty("span_kind").GetString());
+    AssertEqual("GET /checkout", payload.GetProperty("context").GetProperty("route").GetString());
+}
+
 static async Task CheckInUsesCheckInEndpoint()
 {
     var handler = new RecordingHandler();
@@ -136,6 +174,42 @@ static async Task AspNetCoreExceptionMiddlewareReportsAndRethrows()
     var request = payload.GetProperty("context").GetProperty("request");
     AssertEqual("https://app.example.test/approvals", request.GetProperty("url").GetString());
     AssertEqual(500, request.GetProperty("status").GetInt32());
+}
+
+static async Task AspNetCoreRequestMiddlewareCanCaptureSpans()
+{
+    var handler = new RecordingHandler();
+    var client = BuildClient(handler);
+    var options = new LogisterAspNetCoreOptions
+    {
+        CaptureRequestSpans = true
+    };
+    var middleware = new LogisterRequestTransactionMiddleware(
+        context =>
+        {
+            context.Response.StatusCode = 201;
+            return Task.CompletedTask;
+        },
+        client,
+        options,
+        NullLogger<LogisterRequestTransactionMiddleware>.Instance);
+
+    var context = new DefaultHttpContext();
+    context.Request.Method = "POST";
+    context.Request.Scheme = "https";
+    context.Request.Host = new HostString("app.example.test");
+    context.Request.Path = "/approvals";
+    context.TraceIdentifier = "req-aspnet";
+
+    await middleware.InvokeAsync(context);
+
+    var payload = handler.LastJson.RootElement.GetProperty("event");
+    AssertEqual("span", payload.GetProperty("event_type").GetString());
+    AssertEqual("server", payload.GetProperty("kind").GetString());
+    AssertEqual("ok", payload.GetProperty("status").GetString());
+    AssertEqual("req-aspnet", payload.GetProperty("request_id").GetString());
+    AssertEqual("aspnetcore", payload.GetProperty("context").GetProperty("framework").GetString());
+    AssertEqual(201, payload.GetProperty("context").GetProperty("request").GetProperty("status").GetInt32());
 }
 
 static async Task AspNetCoreRequestCookiesAreCapturedOnlyWhenEnabled()

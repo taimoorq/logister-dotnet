@@ -25,7 +25,7 @@ public sealed class LogisterRequestTransactionMiddleware
 
     public async Task InvokeAsync(HttpContext context)
     {
-        if (!_options.CaptureRequestTransactions)
+        if (!_options.CaptureRequestTransactions && !_options.CaptureRequestSpans)
         {
             await _next(context);
             return;
@@ -39,7 +39,15 @@ public sealed class LogisterRequestTransactionMiddleware
         finally
         {
             stopwatch.Stop();
-            await CaptureTransactionAsync(context, stopwatch.Elapsed.TotalMilliseconds);
+            if (_options.CaptureRequestTransactions)
+            {
+                await CaptureTransactionAsync(context, stopwatch.Elapsed.TotalMilliseconds);
+            }
+
+            if (_options.CaptureRequestSpans)
+            {
+                await CaptureSpanAsync(context, stopwatch.Elapsed.TotalMilliseconds);
+            }
         }
     }
 
@@ -64,6 +72,34 @@ public sealed class LogisterRequestTransactionMiddleware
         catch (Exception logisterError)
         {
             _logger.LogDebug(logisterError, "Failed to send ASP.NET Core transaction to Logister.");
+        }
+    }
+
+    private async Task CaptureSpanAsync(HttpContext context, double durationMs)
+    {
+        try
+        {
+            var activity = Activity.Current;
+            var transactionName = context.GetEndpoint()?.DisplayName ?? $"{context.Request.Method} {context.Request.Path}";
+            await _client.CaptureSpanAsync(
+                transactionName,
+                durationMs,
+                new SpanOptions
+                {
+                    Kind = "server",
+                    Status = context.Response.StatusCode >= 500 ? "error" : "ok",
+                    Context = LogisterHttpContext.BuildContext(context, _options, durationMs),
+                    RequestId = context.TraceIdentifier,
+                    TraceId = activity?.TraceId.ToString() ?? context.TraceIdentifier,
+                    SpanId = activity?.SpanId.ToString(),
+                    ParentSpanId = activity?.ParentSpanId.ToString(),
+                    UserId = context.User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+                },
+                context.RequestAborted);
+        }
+        catch (Exception logisterError)
+        {
+            _logger.LogDebug(logisterError, "Failed to send ASP.NET Core request span to Logister.");
         }
     }
 }

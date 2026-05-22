@@ -57,6 +57,13 @@ public static class LogisterServiceCollectionExtensions
                 options.CaptureRequestTransactions = parsed;
             }
         });
+        SetIfPresent(section, "CaptureRequestSpans", value =>
+        {
+            if (bool.TryParse(value, out var parsed))
+            {
+                options.CaptureRequestSpans = parsed;
+            }
+        });
         SetIfPresent(section, "CaptureRequestHeaders", value =>
         {
             if (bool.TryParse(value, out var parsed))

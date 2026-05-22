@@ -154,6 +154,64 @@ public sealed class LogisterClient : IDisposable
             cancellationToken: cancellationToken);
     }
 
+    public Task<LogisterResponse> CaptureSpanAsync(
+        string name,
+        double durationMs,
+        SpanOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        options ??= new SpanOptions();
+
+        var spanId = FirstPresent(options.SpanId, NewSpanId())!;
+        var traceId = FirstPresent(options.TraceId, options.RequestId, spanId);
+        var kind = FirstPresent(options.Kind, "internal")!;
+        var startedAt = options.StartedAt ?? options.OccurredAt ?? DateTimeOffset.UtcNow;
+
+        var context = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        MergeContext(context, options.Context);
+        SetIfMissing(context, "name", name);
+        SetIfMissing(context, "trace_id", traceId);
+        SetIfMissing(context, "request_id", options.RequestId);
+        SetIfMissing(context, "span_id", spanId);
+        SetIfMissing(context, "parent_span_id", options.ParentSpanId);
+        SetIfMissing(context, "span_kind", kind);
+        SetIfMissing(context, "kind", kind);
+        SetIfMissing(context, "status", options.Status);
+        SetIfMissing(context, "duration_ms", durationMs);
+        SetIfMissing(context, "started_at", NormalizeTimestamp(startedAt));
+        SetIfMissing(context, "ended_at", NormalizeOptionalTimestamp(options.EndedAt));
+
+        var eventContext = BuildContext(
+            context,
+            environment: options.Environment,
+            release: options.Release,
+            traceId: traceId,
+            requestId: options.RequestId,
+            sessionId: options.SessionId,
+            userId: options.UserId);
+
+        var payload = new IngestEnvelope(new IngestEventPayload(
+            EventType: "span",
+            Level: options.Level ?? (string.Equals(options.Status, "error", StringComparison.OrdinalIgnoreCase) ? "error" : "info"),
+            Message: options.Message ?? name,
+            Fingerprint: options.Fingerprint,
+            OccurredAt: NormalizeTimestamp(options.OccurredAt ?? startedAt),
+            Context: eventContext,
+            Name: name,
+            DurationMs: durationMs,
+            TraceId: traceId,
+            RequestId: options.RequestId,
+            SpanId: spanId,
+            ParentSpanId: options.ParentSpanId,
+            Kind: kind,
+            Status: options.Status,
+            StartedAt: NormalizeTimestamp(startedAt),
+            EndedAt: NormalizeOptionalTimestamp(options.EndedAt)));
+
+        return PostJsonAsync(IngestPath, payload, cancellationToken);
+    }
+
     public Task<LogisterResponse> SendEventAsync(
         string eventType,
         string level,
@@ -337,9 +395,19 @@ public sealed class LogisterClient : IDisposable
         return (timestamp ?? DateTimeOffset.UtcNow).ToUniversalTime().ToString("O");
     }
 
+    private static string? NormalizeOptionalTimestamp(DateTimeOffset? timestamp)
+    {
+        return timestamp?.ToUniversalTime().ToString("O");
+    }
+
     private static string? FirstPresent(params string?[] values)
     {
         return values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+    }
+
+    private static string NewSpanId()
+    {
+        return Guid.NewGuid().ToString("N")[..16];
     }
 
     private sealed record IngestEnvelope([property: JsonPropertyName("event")] IngestEventPayload Event);
@@ -350,7 +418,17 @@ public sealed class LogisterClient : IDisposable
         [property: JsonPropertyName("message")] string Message,
         [property: JsonPropertyName("fingerprint")] string? Fingerprint,
         [property: JsonPropertyName("occurred_at")] string OccurredAt,
-        [property: JsonPropertyName("context")] IDictionary<string, object?> Context);
+        [property: JsonPropertyName("context")] IDictionary<string, object?> Context,
+        [property: JsonPropertyName("name")] string? Name = null,
+        [property: JsonPropertyName("duration_ms")] double? DurationMs = null,
+        [property: JsonPropertyName("trace_id")] string? TraceId = null,
+        [property: JsonPropertyName("request_id")] string? RequestId = null,
+        [property: JsonPropertyName("span_id")] string? SpanId = null,
+        [property: JsonPropertyName("parent_span_id")] string? ParentSpanId = null,
+        [property: JsonPropertyName("kind")] string? Kind = null,
+        [property: JsonPropertyName("status")] string? Status = null,
+        [property: JsonPropertyName("started_at")] string? StartedAt = null,
+        [property: JsonPropertyName("ended_at")] string? EndedAt = null);
 
     private sealed record CheckInEnvelope([property: JsonPropertyName("check_in")] CheckInPayload CheckIn);
 

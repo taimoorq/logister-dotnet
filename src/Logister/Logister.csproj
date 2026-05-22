@@ -9,7 +9,7 @@
     <Version>0.1.3</Version>
     <Authors>Taimoor Qureshi</Authors>
     <Company>Logister</Company>
-    <Description>.NET SDK for sending errors, logs, metrics, transactions, and check-ins to Logister.</Description>
+    <Description>.NET SDK for sending errors, logs, metrics, transactions, spans, and check-ins to Logister.</Description>
     <PackageTags>logister;observability;error-tracking;monitoring;dotnet;csharp</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>

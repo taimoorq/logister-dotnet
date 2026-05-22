@@ -1,6 +1,6 @@
 # logister-dotnet
 
-.NET SDK for sending errors, logs, metrics, transactions, and check-ins to Logister.
+.NET SDK for sending errors, logs, metrics, transactions, spans, and check-ins to Logister.
 
 This repo contains two packages:
 
@@ -62,6 +62,7 @@ Add configuration:
     "Environment": "production",
     "Release": "quriatime@2026.04.30",
     "CaptureRequestTransactions": true,
+    "CaptureRequestSpans": true,
     "CaptureRequestHeaders": true,
     "CaptureRequestCookies": false
   }
@@ -132,6 +133,18 @@ await client.CaptureMetricAsync("timesheet.approvals.pending", 7, new MetricOpti
     Unit = "count"
 });
 
+await client.CaptureSpanAsync("render checkout", 82.1, new SpanOptions
+{
+    Kind = "render",
+    Status = "ok",
+    TraceId = "trace-123",
+    ParentSpanId = "span-root",
+    Context = new Dictionary<string, object?>
+    {
+        ["route"] = "POST /checkout"
+    }
+});
+
 await client.CheckInAsync("nightly-import", "ok", new CheckInOptions
 {
     Release = "worker@2026.04.30",
@@ -142,7 +155,7 @@ await client.CheckInAsync("nightly-import", "ok", new CheckInOptions
 });
 ```
 
-`CaptureOptions` supports per-event `Environment`, `Release`, `TraceId`, `RequestId`, `SessionId`, and `UserId` for errors, logs, metrics, and transactions. `MetricOptions` adds `Unit`, and `CheckInOptions` supports `Release`, `DurationMs`, `ExpectedIntervalSeconds`, `TraceId`, and `RequestId` so monitor records line up with the Logister API.
+`CaptureOptions` supports per-event `Environment`, `Release`, `TraceId`, `RequestId`, `SessionId`, and `UserId` for errors, logs, metrics, and transactions. `MetricOptions` adds `Unit`; `SpanOptions` adds `SpanId`, `ParentSpanId`, `Kind`, `Status`, `StartedAt`, and `EndedAt`; and `CheckInOptions` supports `Release`, `DurationMs`, `ExpectedIntervalSeconds`, `TraceId`, and `RequestId` so monitor records line up with the Logister API.
 
 ## Using project Insights beta
 
@@ -181,6 +194,18 @@ await client.CaptureTransactionAsync("POST /checkout", 182.4, new CaptureOptions
     }
 });
 
+await client.CaptureSpanAsync("render checkout", 82.1, new SpanOptions
+{
+    Kind = "render",
+    Status = "ok",
+    TraceId = "trace_123",
+    ParentSpanId = "span_root",
+    Context = new Dictionary<string, object?>
+    {
+        ["route"] = "POST /checkout"
+    }
+});
+
 await client.CaptureMessageAsync("payment provider retry", new CaptureOptions
 {
     Level = "warn",
@@ -208,8 +233,8 @@ Practical Insights recipes:
 
 - Release validation: set `LOGISTER_RELEASE` or `Logister:Release`, then filter Insights to the new release and compare error count, transaction P95, and custom metrics.
 - Queue monitoring: report metrics such as `queue.depth`, `queue.latency`, `jobs.retry_count`, and `worker.active_jobs` with stable `queue` and `service` context keys.
-- ASP.NET Core performance triage: enable request transactions, then add matching `route`, `tenant_tier`, or `feature_flag` context to custom logs and metrics.
-- Instrumentation audit: open Insights after deploy and confirm errors, logs, metrics, transactions, and check-ins all appear in the recent stream.
+- ASP.NET Core performance triage: enable `CaptureRequestSpans` to feed request load waterfall charts, then add matching `route`, `tenant_tier`, or `feature_flag` context to custom logs and metrics.
+- Instrumentation audit: open Insights after deploy and confirm errors, logs, metrics, transactions, spans, and check-ins all appear in the recent stream.
 
 Keep custom attributes stable and low-cardinality. Good top-level context keys include `service`, `region`, `queue`, `route`, `tenant_tier`, `provider`, and `feature_flag`. Avoid raw IDs, emails, request bodies, SQL text, and per-user values as Insights dimensions.
 

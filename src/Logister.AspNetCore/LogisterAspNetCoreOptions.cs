@@ -4,6 +4,7 @@ public sealed class LogisterAspNetCoreOptions
 {
     public LogisterOptions Client { get; } = LogisterOptions.FromEnvironment();
     public bool CaptureRequestTransactions { get; set; }
+    public bool CaptureRequestSpans { get; set; }
     public bool CaptureRequestHeaders { get; set; }
     public bool CaptureRequestCookies { get; set; }
     public string RedactedCookieValue { get; set; } = "[Filtered]";

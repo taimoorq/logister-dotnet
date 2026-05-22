@@ -4,6 +4,7 @@ All notable changes to `logister-dotnet` will be documented in this file.
 
 ## v0.1.3 - 2026-05-22
 
+- Added `CaptureSpanAsync` plus opt-in ASP.NET Core request span capture for request load waterfall charts.
 - Added README guidance for using .NET reports with the Logister project Insights beta, including practical metric, transaction, log, check-in, and custom attribute examples.
 - Consolidated tag releases so both NuGet packages publish before the matching GitHub release is created or updated.
 
