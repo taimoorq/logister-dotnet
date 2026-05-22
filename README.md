@@ -232,7 +232,7 @@ dotnet pack -c Release
 
 ## Publishing
 
-Pull requests and pushes to `main` run CI: restore, build, tests, and package creation. A commit or merge alone does not publish to NuGet. NuGet publishing happens from `v*` release tags so GitHub Releases and NuGet package versions stay aligned.
+Pull requests and pushes to `main` run CI: restore, build, tests, and package creation. A commit or merge alone does not publish to NuGet. NuGet publishing happens from `v*` release tags in the same workflow that creates the GitHub Release, so NuGet package versions and GitHub Releases stay aligned.
 
 Repository setup:
 
@@ -252,4 +252,4 @@ git tag vX.Y.Z
 git push origin vX.Y.Z
 ```
 
-The publish workflow verifies that the tag version matches both `.csproj` package versions before pushing to NuGet. The GitHub release workflow uses the matching changelog section as the release notes. The NuGet push uses `--skip-duplicate`, so rerunning a workflow for an already-published version will not republish the package.
+The release workflow verifies that the tag version matches both `.csproj` package versions, runs tests, packs both packages, publishes missing NuGet packages, and then uses the matching changelog section as the GitHub release notes. The NuGet push uses `--skip-duplicate`, so rerunning a workflow for an already-published version will not republish the package.
