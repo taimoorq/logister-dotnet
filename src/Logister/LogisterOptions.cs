@@ -10,7 +10,7 @@ public sealed class LogisterOptions
     public IDictionary<string, object?> DefaultContext { get; } =
         new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
     public bool CaptureExceptionData { get; set; } = true;
-    public string UserAgent { get; set; } = "logister-dotnet/0.1.3";
+    public string UserAgent { get; set; } = "logister-dotnet/0.1.4";
 
     public static LogisterOptions FromEnvironment()
     {
