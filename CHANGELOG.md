@@ -2,6 +2,10 @@
 
 All notable changes to `logister-dotnet` will be documented in this file.
 
+## v0.1.3 - 2026-05-22
+
+- Added README guidance for using .NET reports with the Logister project Insights beta, including practical metric, transaction, log, check-in, and custom attribute examples.
+
 ## v0.1.2 - 2026-05-21
 
 - Added top-level `release` to .NET check-in payloads so monitor records match the Logister API contract.

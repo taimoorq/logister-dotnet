@@ -38,6 +38,8 @@ In the Logister web app:
 3. Generate a project API key from project settings.
 4. Configure your .NET app with that API key and your Logister base URL.
 
+Project Insights beta guide: https://docs.logister.org/product/#insights-beta
+
 Do not commit real API keys to this repo or your application repo. Use environment variables, .NET user secrets, your hosting provider's secret store, or another deployment secret manager.
 
 ## ASP.NET Core
@@ -133,6 +135,75 @@ await client.CheckInAsync("nightly-import", "ok", new CheckInOptions
 ```
 
 `CaptureOptions` supports per-event `Environment`, `Release`, `TraceId`, `RequestId`, `SessionId`, and `UserId` for errors, logs, metrics, and transactions. `MetricOptions` adds `Unit`, and `CheckInOptions` supports `Release`, `DurationMs`, `ExpectedIntervalSeconds`, `TraceId`, and `RequestId` so monitor records line up with the Logister API.
+
+## Using project Insights beta
+
+The Logister project Insights tab combines Inbox, Activity, and Performance data into live dashboard views. .NET services get the most useful Insights view when they send consistent `Environment`, `Release`, and stable top-level context attributes.
+
+Set deployment context once through configuration or environment variables, then attach low-cardinality dimensions to metrics, transactions, logs, and check-ins:
+
+```csharp
+using Logister;
+
+var options = LogisterOptions.FromEnvironment();
+options.DefaultContext["service"] = "billing-api";
+options.DefaultContext["region"] = "us-east-1";
+
+using var client = new LogisterClient(options);
+
+await client.CaptureMetricAsync("queue.depth", 42, new MetricOptions
+{
+    Unit = "jobs",
+    Context = new Dictionary<string, object?>
+    {
+        ["service"] = "billing-worker",
+        ["queue"] = "billing",
+        ["tenant_tier"] = "enterprise"
+    }
+});
+
+await client.CaptureTransactionAsync("POST /checkout", 182.4, new CaptureOptions
+{
+    RequestId = "req_123",
+    Context = new Dictionary<string, object?>
+    {
+        ["route"] = "POST /checkout",
+        ["feature_flag"] = "new_checkout",
+        ["tenant_tier"] = "enterprise"
+    }
+});
+
+await client.CaptureMessageAsync("payment provider retry", new CaptureOptions
+{
+    Level = "warn",
+    Context = new Dictionary<string, object?>
+    {
+        ["service"] = "billing-worker",
+        ["provider"] = "stripe",
+        ["queue"] = "billing"
+    }
+});
+
+await client.CheckInAsync("nightly-reconcile", "ok", new CheckInOptions
+{
+    ExpectedIntervalSeconds = 3600,
+    DurationMs = 842.7,
+    Context = new Dictionary<string, object?>
+    {
+        ["service"] = "billing-worker",
+        ["queue"] = "reconcile"
+    }
+});
+```
+
+Practical Insights recipes:
+
+- Release validation: set `LOGISTER_RELEASE` or `Logister:Release`, then filter Insights to the new release and compare error count, transaction P95, and custom metrics.
+- Queue monitoring: report metrics such as `queue.depth`, `queue.latency`, `jobs.retry_count`, and `worker.active_jobs` with stable `queue` and `service` context keys.
+- ASP.NET Core performance triage: enable request transactions, then add matching `route`, `tenant_tier`, or `feature_flag` context to custom logs and metrics.
+- Instrumentation audit: open Insights after deploy and confirm errors, logs, metrics, transactions, and check-ins all appear in the recent stream.
+
+Keep custom attributes stable and low-cardinality. Good top-level context keys include `service`, `region`, `queue`, `route`, `tenant_tier`, `provider`, and `feature_flag`. Avoid raw IDs, emails, request bodies, SQL text, and per-user values as Insights dimensions.
 
 ## Environment variables
 
