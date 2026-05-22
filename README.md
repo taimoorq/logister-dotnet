@@ -7,6 +7,14 @@ This repo contains two packages:
 - `Logister`: base client for any .NET 8+ app.
 - `Logister.AspNetCore`: service registration and middleware for ASP.NET Core apps.
 
+## Package Links
+
+- NuGet `Logister`: https://www.nuget.org/packages/Logister
+- NuGet `Logister.AspNetCore`: https://www.nuget.org/packages/Logister.AspNetCore
+- GitHub releases: https://github.com/taimoorq/logister-dotnet/releases
+- Source repository: https://github.com/taimoorq/logister-dotnet
+- Integration docs: https://docs.logister.org/integrations/dotnet/
+
 ## Package strategy
 
 Use NuGet.org as the public package registry:
@@ -22,7 +30,7 @@ dotnet add package Logister
 dotnet add package Logister.AspNetCore
 ```
 
-Until the packages are published, reference the projects locally:
+For local development, forks, or unreleased SDK changes, reference the projects locally:
 
 ```xml
 <ProjectReference Include="../logister-dotnet/src/Logister/Logister.csproj" />
