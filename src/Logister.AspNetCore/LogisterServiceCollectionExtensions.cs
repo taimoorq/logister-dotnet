@@ -42,6 +42,9 @@ public static class LogisterServiceCollectionExtensions
         });
         SetIfPresent(section, "Environment", value => options.Client.Environment = value);
         SetIfPresent(section, "Release", value => options.Client.Release = value);
+        SetIfPresent(section, "Repository", value => options.Client.Repository = value);
+        SetIfPresent(section, "CommitSha", value => options.Client.CommitSha = value);
+        SetIfPresent(section, "Branch", value => options.Client.Branch = value);
         SetIfPresent(section, "UserAgent", value => options.Client.UserAgent = value);
         SetIfPresent(section, "TimeoutSeconds", value =>
         {

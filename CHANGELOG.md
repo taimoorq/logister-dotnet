@@ -2,6 +2,11 @@
 
 All notable changes to `logister-dotnet` will be documented in this file.
 
+## v0.1.5 - 2026-06-18
+
+- Added first-class source context fields (`Repository`, `CommitSha`, and `Branch`) with `LOGISTER_*`, GitHub Actions environment variable, and ASP.NET Core configuration support.
+- Added `RecordDeploymentAsync` for posting release-to-commit deployment records to Logister.
+
 ## v0.1.4 - 2026-05-22
 
 - Added `CaptureSpanAsync` plus opt-in ASP.NET Core request span capture for request load waterfall charts.

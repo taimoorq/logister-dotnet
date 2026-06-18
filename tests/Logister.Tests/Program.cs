@@ -11,6 +11,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("capture metric sends metric value and unit", CaptureMetricSendsMetricContext),
     ("capture span sends trace timing payload", CaptureSpanSendsTraceTimingPayload),
     ("check-in uses check-in endpoint", CheckInUsesCheckInEndpoint),
+    ("deployment records use deployment endpoint", DeploymentRecordUsesDeploymentEndpoint),
     ("ASP.NET Core exception middleware reports and rethrows", AspNetCoreExceptionMiddlewareReportsAndRethrows),
     ("ASP.NET Core request middleware can capture spans", AspNetCoreRequestMiddlewareCanCaptureSpans),
     ("ASP.NET Core request cookies are captured only when enabled", AspNetCoreRequestCookiesAreCapturedOnlyWhenEnabled)
@@ -73,7 +74,14 @@ static async Task CaptureExceptionSendsStructuredContext()
 static async Task CaptureMetricSendsMetricContext()
 {
     var handler = new RecordingHandler();
-    using var client = BuildClient(handler);
+    using var client = BuildClient(handler, options =>
+    {
+        options.Environment = "production";
+        options.Release = "api@1.2.3";
+        options.Repository = "acme/timesheets";
+        options.CommitSha = "abc1234";
+        options.Branch = "main";
+    });
 
     await client.CaptureMetricAsync("timesheet.approvals.pending", 7, new MetricOptions { Unit = "count" });
 
@@ -82,6 +90,11 @@ static async Task CaptureMetricSendsMetricContext()
     AssertEqual("timesheet.approvals.pending", payload.GetProperty("message").GetString());
     AssertEqual(7, payload.GetProperty("context").GetProperty("metric").GetProperty("value").GetDouble());
     AssertEqual("count", payload.GetProperty("context").GetProperty("metric").GetProperty("unit").GetString());
+    AssertEqual("production", payload.GetProperty("context").GetProperty("environment").GetString());
+    AssertEqual("api@1.2.3", payload.GetProperty("context").GetProperty("release").GetString());
+    AssertEqual("acme/timesheets", payload.GetProperty("context").GetProperty("repository").GetString());
+    AssertEqual("abc1234", payload.GetProperty("context").GetProperty("commit_sha").GetString());
+    AssertEqual("main", payload.GetProperty("context").GetProperty("branch").GetString());
 }
 
 static async Task CaptureSpanSendsTraceTimingPayload()
@@ -146,6 +159,36 @@ static async Task CheckInUsesCheckInEndpoint()
     AssertEqual(600, payload.GetProperty("expected_interval_seconds").GetInt32());
     AssertEqual("trace-123", payload.GetProperty("trace_id").GetString());
     AssertEqual("req-123", payload.GetProperty("request_id").GetString());
+}
+
+static async Task DeploymentRecordUsesDeploymentEndpoint()
+{
+    var handler = new RecordingHandler();
+    using var client = BuildClient(handler, options =>
+    {
+        options.Environment = "production";
+        options.Repository = "acme/timesheets";
+        options.CommitSha = "abcdef123456";
+        options.Branch = "main";
+    });
+
+    await client.RecordDeploymentAsync(new DeploymentOptions
+    {
+        Release = "timesheets@2026.06.18",
+        DeployedAt = DateTimeOffset.Parse("2026-06-18T14:30:00Z"),
+        PullRequestNumber = 42,
+        WorkflowRunUrl = "https://github.com/acme/timesheets/actions/runs/123"
+    });
+
+    AssertEqual("https://logister.test/api/v1/deployments", handler.LastRequestUri?.ToString());
+    var payload = handler.LastJson.RootElement.GetProperty("deployment");
+    AssertEqual("timesheets@2026.06.18", payload.GetProperty("release").GetString());
+    AssertEqual("production", payload.GetProperty("environment").GetString());
+    AssertEqual("acme/timesheets", payload.GetProperty("repository").GetString());
+    AssertEqual("abcdef123456", payload.GetProperty("commit_sha").GetString());
+    AssertEqual("main", payload.GetProperty("branch").GetString());
+    AssertEqual(42, payload.GetProperty("pull_request_number").GetInt32());
+    AssertEqual("https://github.com/acme/timesheets/actions/runs/123", payload.GetProperty("workflow_run_url").GetString());
 }
 
 static async Task AspNetCoreExceptionMiddlewareReportsAndRethrows()
@@ -255,13 +298,14 @@ static async Task AspNetCoreRequestCookiesAreCapturedOnlyWhenEnabled()
     AssertEqual("[Filtered]", cookies.GetProperty(".AspNetCore.Cookies").GetString());
 }
 
-static LogisterClient BuildClient(RecordingHandler handler)
+static LogisterClient BuildClient(RecordingHandler handler, Action<LogisterOptions>? configure = null)
 {
     var options = new LogisterOptions
     {
         ApiKey = "test-key",
         BaseUrl = new Uri("https://logister.test")
     };
+    configure?.Invoke(options);
 
     return new LogisterClient(options, new HttpClient(handler));
 }

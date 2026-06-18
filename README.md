@@ -238,6 +238,35 @@ Practical Insights recipes:
 
 Keep custom attributes stable and low-cardinality. Good top-level context keys include `service`, `region`, `queue`, `route`, `tenant_tier`, `provider`, and `feature_flag`. Avoid raw IDs, emails, request bodies, SQL text, and per-user values as Insights dimensions.
 
+## GitHub source context and deployments
+
+When a Logister project is connected to a GitHub repository, set source context once so events can resolve stack frames to the exact deployed code:
+
+```csharp
+var options = LogisterOptions.FromEnvironment();
+options.Repository = "acme/checkout";
+options.CommitSha = "4f8c2d1a9b7e6c5d4a3b2c1d0e9f8a7b6c5d4e3f";
+options.Branch = "main";
+
+using var client = new LogisterClient(options);
+```
+
+ASP.NET Core apps can also use `Logister:Repository`, `Logister:CommitSha`, and `Logister:Branch` configuration keys. `LogisterOptions.FromEnvironment()` reads `LOGISTER_REPOSITORY`, `LOGISTER_COMMIT_SHA`, and `LOGISTER_BRANCH`, falling back to GitHub Actions variables when present.
+
+CI/CD can record the release-to-commit mapping directly:
+
+```csharp
+await client.RecordDeploymentAsync(new DeploymentOptions
+{
+    Release = "checkout@2026.06.18",
+    Environment = "production",
+    Repository = "acme/checkout",
+    CommitSha = "4f8c2d1a9b7e6c5d4a3b2c1d0e9f8a7b6c5d4e3f",
+    Branch = "main",
+    WorkflowRunUrl = "https://github.com/acme/checkout/actions/runs/123"
+});
+```
+
 ## Environment variables
 
 The base client can be created from environment variables:
@@ -252,6 +281,9 @@ Supported variables:
 - `LOGISTER_BASE_URL`
 - `LOGISTER_ENVIRONMENT`
 - `LOGISTER_RELEASE`
+- `LOGISTER_REPOSITORY`
+- `LOGISTER_COMMIT_SHA`
+- `LOGISTER_BRANCH`
 - `LOGISTER_TIMEOUT`
 
 ## Development
@@ -265,7 +297,7 @@ dotnet pack -c Release
 
 ## Publishing
 
-Pull requests and pushes to `main` run CI: restore, build, tests, and package creation. A commit or merge alone does not publish to NuGet. NuGet publishing happens from `v*` release tags in the same workflow that creates the GitHub Release, so NuGet package versions and GitHub Releases stay aligned.
+Pull requests and pushes to `main` run CI: restore, build, tests, and package creation. After CI passes on `main`, the release-from-main workflow creates the matching `v*` tag. NuGet publishing happens from that version tag in the same workflow that creates the GitHub Release, so NuGet package versions and GitHub Releases stay aligned.
 
 Repository setup:
 
@@ -277,8 +309,7 @@ Release process:
 
 1. Bump the `<Version>` value in both package project files to the next NuGet version.
 2. Add a matching `CHANGELOG.md` section named `## vX.Y.Z - YYYY-MM-DD`.
-3. Merge the change to `main`.
-4. Create and push a matching tag:
+3. Merge the change to `main` and let the release-from-main workflow create and dispatch the matching tag, or create the tag manually:
 
 ```shell
 git tag vX.Y.Z

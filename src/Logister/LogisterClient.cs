@@ -9,6 +9,7 @@ public sealed class LogisterClient : IDisposable
 {
     private const string IngestPath = "/api/v1/ingest_events";
     private const string CheckInPath = "/api/v1/check_ins";
+    private const string DeploymentPath = "/api/v1/deployments";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -278,6 +279,38 @@ public sealed class LogisterClient : IDisposable
         return PostJsonAsync(CheckInPath, payload, cancellationToken);
     }
 
+    public Task<LogisterResponse> RecordDeploymentAsync(
+        DeploymentOptions deployment,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(deployment);
+
+        var release = FirstPresent(deployment.Release, _options.Release);
+        var repository = FirstPresent(deployment.Repository, _options.Repository);
+        var commitSha = FirstPresent(deployment.CommitSha, _options.CommitSha);
+
+        ArgumentException.ThrowIfNullOrWhiteSpace(release);
+        ArgumentException.ThrowIfNullOrWhiteSpace(repository);
+        ArgumentException.ThrowIfNullOrWhiteSpace(commitSha);
+
+        var payload = new DeploymentEnvelope(new DeploymentPayload(
+            Release: release,
+            Environment: FirstPresent(deployment.Environment, _options.Environment),
+            Repository: repository,
+            CommitSha: commitSha,
+            Branch: FirstPresent(deployment.Branch, _options.Branch),
+            DeployedAt: NormalizeOptionalTimestamp(deployment.DeployedAt),
+            PullRequestNumber: deployment.PullRequestNumber,
+            PullRequestUrl: deployment.PullRequestUrl,
+            ReleaseTag: deployment.ReleaseTag,
+            ReleaseUrl: deployment.ReleaseUrl,
+            CompareUrl: deployment.CompareUrl,
+            WorkflowRunUrl: deployment.WorkflowRunUrl,
+            DeploymentUrl: deployment.DeploymentUrl));
+
+        return PostJsonAsync(DeploymentPath, payload, cancellationToken);
+    }
+
     public void Dispose()
     {
         if (_disposeHttpClient)
@@ -338,6 +371,9 @@ public sealed class LogisterClient : IDisposable
 
         SetIfMissing(merged, "environment", FirstPresent(environment, _options.Environment));
         SetIfMissing(merged, "release", FirstPresent(release, _options.Release));
+        SetIfMissing(merged, "repository", _options.Repository);
+        SetIfMissing(merged, "commit_sha", _options.CommitSha);
+        SetIfMissing(merged, "branch", _options.Branch);
         SetIfMissing(merged, "trace_id", traceId);
         SetIfMissing(merged, "request_id", requestId);
         SetIfMissing(merged, "session_id", sessionId);
@@ -443,4 +479,21 @@ public sealed class LogisterClient : IDisposable
         [property: JsonPropertyName("trace_id")] string? TraceId,
         [property: JsonPropertyName("request_id")] string? RequestId,
         [property: JsonPropertyName("context")] IDictionary<string, object?>? Context);
+
+    private sealed record DeploymentEnvelope([property: JsonPropertyName("deployment")] DeploymentPayload Deployment);
+
+    private sealed record DeploymentPayload(
+        [property: JsonPropertyName("release")] string Release,
+        [property: JsonPropertyName("environment")] string? Environment,
+        [property: JsonPropertyName("repository")] string Repository,
+        [property: JsonPropertyName("commit_sha")] string CommitSha,
+        [property: JsonPropertyName("branch")] string? Branch,
+        [property: JsonPropertyName("deployed_at")] string? DeployedAt,
+        [property: JsonPropertyName("pull_request_number")] int? PullRequestNumber,
+        [property: JsonPropertyName("pull_request_url")] string? PullRequestUrl,
+        [property: JsonPropertyName("release_tag")] string? ReleaseTag,
+        [property: JsonPropertyName("release_url")] string? ReleaseUrl,
+        [property: JsonPropertyName("compare_url")] string? CompareUrl,
+        [property: JsonPropertyName("workflow_run_url")] string? WorkflowRunUrl,
+        [property: JsonPropertyName("deployment_url")] string? DeploymentUrl);
 }
