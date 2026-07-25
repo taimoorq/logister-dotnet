@@ -1,11 +1,50 @@
 # logister-dotnet
 
-.NET SDK for sending errors, logs, metrics, transactions, spans, and check-ins to Logister.
+.NET SDK for sending errors, logs, metrics, transactions, spans, and scheduled-job check-ins to Logister.
 
 This repo contains two packages:
 
-- `Logister`: base client for any .NET 8+ app.
-- `Logister.AspNetCore`: service registration and middleware for ASP.NET Core apps.
+- `Logister`: the base client for services, workers, console apps, and custom integrations.
+- `Logister.AspNetCore`: dependency injection plus exception and request-timing middleware for ASP.NET Core.
+
+Both packages target .NET 8 and .NET 10. .NET 9 applications can consume the .NET 8 target.
+
+## Quick start
+
+Create a project in Logister and generate a project API key under **Project settings → API keys**, then install the base package:
+
+```shell
+dotnet add package Logister
+```
+
+Keep the key in your secret store or environment, not in source control:
+
+```shell
+export LOGISTER_API_KEY="<project-api-key>"
+export LOGISTER_BASE_URL="https://logister.example.com"
+export LOGISTER_ENVIRONMENT="development"
+```
+
+Send a test event from an async entry point:
+
+```csharp
+using Logister;
+
+using var client = new LogisterClient(LogisterOptions.FromEnvironment());
+
+await client.CaptureExceptionAsync(
+    new InvalidOperationException("README test error"),
+    new CaptureOptions
+    {
+        Fingerprint = "readme-test-error",
+        Context = new Dictionary<string, object?>
+        {
+            ["component"] = "checkout"
+        }
+    });
+```
+
+Open the project inbox and confirm that **README test error** appears. A `401` response usually means the API key or base URL is wrong; use the [.NET integration guide](https://logister.org/docs/integrations/dotnet/) for the complete setup and troubleshooting path.
 
 ## Package Links
 
@@ -13,15 +52,16 @@ This repo contains two packages:
 - NuGet `Logister.AspNetCore`: https://www.nuget.org/packages/Logister.AspNetCore
 - GitHub releases: https://github.com/taimoorq/logister-dotnet/releases
 - Source repository: https://github.com/taimoorq/logister-dotnet
-- Integration docs: https://docs.logister.org/integrations/dotnet/
+- Integration docs: https://logister.org/docs/integrations/dotnet/
 
-## Package strategy
+## Which package should I install?
 
-Use NuGet.org as the public package registry:
+| App type | Package |
+|---|---|
+| Worker, console app, service, or custom framework | `Logister` |
+| ASP.NET Core app that needs automatic request and exception capture | `Logister.AspNetCore` (which depends on `Logister`) |
 
-- `Logister` should stay dependency-light and use the built-in `HttpClient`, `System.Text.Json`, and runtime APIs.
-- `Logister.AspNetCore` should use Microsoft's ASP.NET Core shared framework and `IHttpClientFactory` through `AddHttpClient`.
-- Avoid third-party HTTP, JSON, logging, or retry packages until the SDK has a concrete need. That keeps installation predictable for ASP.NET Core apps like QuriaTime and avoids dependency conflicts for library consumers.
+The base package uses the built-in `HttpClient` and `System.Text.Json`; it does not add a third-party HTTP, logging, or retry stack to your application.
 
 ## Install
 
@@ -46,7 +86,7 @@ In the Logister web app:
 3. Generate a project API key from project settings.
 4. Configure your .NET app with that API key and your Logister base URL.
 
-Project Insights beta guide: https://docs.logister.org/product/#insights-beta
+Project Insights guide: https://logister.org/docs/product/#insights
 
 Do not commit real API keys to this repo or your application repo. Use environment variables, .NET user secrets, your hosting provider's secret store, or another deployment secret manager.
 
@@ -60,7 +100,7 @@ Add configuration:
     "ApiKey": "your-project-api-token",
     "BaseUrl": "https://your-logister-host.example",
     "Environment": "production",
-    "Release": "quriatime@2026.04.30",
+    "Release": "checkout@2026.04.30",
     "CaptureRequestTransactions": true,
     "CaptureRequestSpans": true,
     "CaptureRequestHeaders": true,
@@ -85,9 +125,9 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddLogister(builder.Configuration, options =>
 {
-    options.Client.DefaultContext["service"] = "quriatime-web";
+    options.Client.DefaultContext["service"] = "checkout-web";
     options.CaptureRequestCookies = true;
-    options.SensitiveRequestCookieNames.Add("quriatime_auth");
+    options.SensitiveRequestCookieNames.Add("checkout_auth");
 });
 
 var app = builder.Build();
@@ -157,7 +197,7 @@ await client.CheckInAsync("nightly-import", "ok", new CheckInOptions
 
 `CaptureOptions` supports per-event `Environment`, `Release`, `TraceId`, `RequestId`, `SessionId`, and `UserId` for errors, logs, metrics, and transactions. `MetricOptions` adds `Unit`; `SpanOptions` adds `SpanId`, `ParentSpanId`, `Kind`, `Status`, `StartedAt`, and `EndedAt`; and `CheckInOptions` supports `Release`, `DurationMs`, `ExpectedIntervalSeconds`, `TraceId`, and `RequestId` so monitor records line up with the Logister API.
 
-## Using project Insights beta
+## Using project Insights
 
 The Logister project Insights tab combines Inbox, Activity, and Performance data into live dashboard views. .NET services get the most useful Insights view when they send consistent `Environment`, `Release`, and stable top-level context attributes.
 
@@ -289,15 +329,16 @@ Supported variables:
 ## Development
 
 ```shell
-dotnet restore
-dotnet build
-dotnet run --project tests/Logister.Tests
-dotnet pack -c Release
+dotnet restore Logister.sln
+dotnet list Logister.sln package --vulnerable --include-transitive --no-restore
+dotnet build Logister.sln --configuration Release --no-restore
+dotnet run --project tests/Logister.Tests/Logister.Tests.csproj --framework net8.0 --configuration Release --no-restore
+dotnet run --project tests/Logister.Tests/Logister.Tests.csproj --framework net10.0 --configuration Release --no-restore
 ```
 
 ## Publishing
 
-Pull requests and pushes to `main` run CI: restore, build, tests, and package creation. After CI passes on `main`, the release-from-main workflow creates the matching `v*` tag. NuGet publishing happens from that version tag in the same workflow that creates the GitHub Release, so NuGet package versions and GitHub Releases stay aligned.
+Pull requests and pushes to `main` restore, audit, build, test, and pack both target frameworks. After CI passes on `main`, the release-from-main workflow creates the matching `vX.Y.Z` tag. The tag workflow publishes both NuGet packages before creating the GitHub Release.
 
 Repository setup:
 
@@ -316,4 +357,12 @@ git tag vX.Y.Z
 git push origin vX.Y.Z
 ```
 
-The release workflow verifies that the tag version matches both `.csproj` package versions, runs tests, packs both packages, publishes missing NuGet packages, and then uses the matching changelog section as the GitHub release notes. The NuGet push uses `--skip-duplicate`, so rerunning a workflow for an already-published version will not republish the package.
+The release workflow verifies that the tag matches both `.csproj` package versions, audits and tests both frameworks, packs both packages, publishes missing NuGet packages, and then uses the matching changelog section as the GitHub release notes. NuGet versions are immutable; if either package has been published, make corrections in a new patch version.
+
+Verify both package IDs and the GitHub Release before calling a release complete:
+
+```shell
+curl -fsSL https://api.nuget.org/v3-flatcontainer/logister/index.json
+curl -fsSL https://api.nuget.org/v3-flatcontainer/logister.aspnetcore/index.json
+gh release view vX.Y.Z
+```
