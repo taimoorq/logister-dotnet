@@ -2,6 +2,12 @@
 
 All notable changes to `logister-dotnet` will be documented in this file.
 
+## v0.2.0 - 2026-07-25
+
+- Added .NET 10 targets while retaining .NET 8 compatibility for the SDK, ASP.NET Core integration, and tests.
+- Added a transitive NuGet vulnerability audit to CI and releases.
+- Pinned GitHub Actions to immutable commits and removed the duplicate release dispatch path.
+
 ## v0.1.5 - 2026-06-18
 
 - Added first-class source context fields (`Repository`, `CommitSha`, and `Branch`) with `LOGISTER_*`, GitHub Actions environment variable, and ASP.NET Core configuration support.

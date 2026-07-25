@@ -7,12 +7,12 @@
   </ItemGroup>
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>true</IsPackable>
     <PackageId>Logister.AspNetCore</PackageId>
-    <Version>0.1.5</Version>
+    <Version>0.2.0</Version>
     <Authors>Taimoor Qureshi</Authors>
     <Company>Logister</Company>
     <Description>ASP.NET Core middleware and service registration for Logister.</Description>
