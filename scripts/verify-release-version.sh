@@ -34,4 +34,14 @@ for project in "${projects[@]}"; do
   fi
 done
 
+if ! grep -Fq "logister-dotnet/$release_version" src/Logister/LogisterOptions.cs; then
+  echo "Default SDK user agent does not match release version $release_version." >&2
+  exit 1
+fi
+
+if ! grep -Eq "^## v${release_version}([[:space:]]|-|$)" CHANGELOG.md; then
+  echo "CHANGELOG.md is missing a v$release_version heading." >&2
+  exit 1
+fi
+
 echo "Release tag $release_ref matches NuGet package version $release_version."

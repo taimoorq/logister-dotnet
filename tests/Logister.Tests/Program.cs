@@ -145,6 +145,7 @@ static async Task CheckInUsesCheckInEndpoint()
         {
             Release = "worker@1.2.3",
             DurationMs = 122.5,
+            CheckedAt = new DateTimeOffset(2026, 8, 9, 12, 30, 0, TimeSpan.Zero),
             ExpectedIntervalSeconds = 600,
             TraceId = "trace-123",
             RequestId = "req-123"
@@ -156,6 +157,8 @@ static async Task CheckInUsesCheckInEndpoint()
     AssertEqual("ok", payload.GetProperty("status").GetString());
     AssertEqual("worker@1.2.3", payload.GetProperty("release").GetString());
     AssertEqual(122.5, payload.GetProperty("duration_ms").GetDouble());
+    AssertEqual("2026-08-09T12:30:00.0000000+00:00", payload.GetProperty("occurred_at").GetString());
+    AssertFalse(payload.TryGetProperty("checked_at", out _), "Check-ins must use the canonical occurred_at field.");
     AssertEqual(600, payload.GetProperty("expected_interval_seconds").GetInt32());
     AssertEqual("trace-123", payload.GetProperty("trace_id").GetString());
     AssertEqual("req-123", payload.GetProperty("request_id").GetString());

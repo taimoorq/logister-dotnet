@@ -27,6 +27,9 @@ jobs:
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
 
+      - name: Check public repository safety
+        run: bash scripts/publication-safety-check.sh
+
       - name: Set up .NET
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
@@ -38,6 +41,23 @@ jobs:
         env:
           TAG_NAME: ${{ github.event.inputs.tag || github.ref_name }}
         run: bash scripts/verify-release-version.sh "$TAG_NAME"
+
+      - name: Build release notes from changelog
+        env:
+          TAG_NAME: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          title="$(awk -v tag="$TAG_NAME" '
+            $0 ~ "^## " tag "([[:space:]]|-|$)" { sub(/^## /, ""); print; exit }
+          ' CHANGELOG.md)"
+          test -n "$title"
+          awk -v tag="$TAG_NAME" '
+            $0 ~ "^## " tag "([[:space:]]|-|$)" { capture=1; next }
+            capture && /^## / { exit }
+            capture { print }
+          ' CHANGELOG.md > release-notes.md
+          test -s release-notes.md
+          echo "RELEASE_TITLE=$title" >> "$GITHUB_ENV"
 
       - name: Restore
         run: dotnet restore Logister.sln
@@ -62,6 +82,16 @@ jobs:
       - name: Pack Logister.AspNetCore
         run: dotnet pack src/Logister.AspNetCore/Logister.AspNetCore.csproj --configuration Release --no-build --output artifacts/packages
 
+      - name: Inspect NuGet package file lists
+        run: |
+          set -euo pipefail
+          for package in artifacts/packages/*.nupkg; do
+            if unzip -Z1 "$package" | grep -Eq '(^|/)(\.env|tmp/release-|[^/]+\.(key|pem|p12|pfx))$|^/|\.\./'; then
+              echo "::error::$package contains a publication-unsafe path."
+              exit 1
+            fi
+          done
+
       - name: Upload package artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -77,8 +107,8 @@ jobs:
           set -euo pipefail
 
           version="${TAG_NAME#v}"
-          logister_versions="$(curl --fail --silent https://api.nuget.org/v3-flatcontainer/logister/index.json || echo '{"versions":[]}')"
-          aspnetcore_versions="$(curl --fail --silent https://api.nuget.org/v3-flatcontainer/logister.aspnetcore/index.json || echo '{"versions":[]}')"
+          logister_versions="$(curl --fail --silent https://api.nuget.org/v3-flatcontainer/logister/index.json)"
+          aspnetcore_versions="$(curl --fail --silent https://api.nuget.org/v3-flatcontainer/logister.aspnetcore/index.json)"
 
           logister_exists=false
           aspnetcore_exists=false
@@ -122,36 +152,30 @@ jobs:
             --source https://api.nuget.org/v3/index.json \
             --skip-duplicate
 
-      - name: Build release notes from changelog
+      - name: Verify NuGet publication
         env:
           TAG_NAME: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
-          set -euo pipefail
-
-          title="$(awk -v tag="$TAG_NAME" '
-            $0 ~ "^## " tag "([[:space:]]|-|$)" {
-              sub(/^## /, "")
-              print
-              exit
-            }
-          ' CHANGELOG.md)"
-
-          if [ -z "$title" ]; then
-            echo "::error::Could not find a CHANGELOG.md heading for $TAG_NAME."
-            exit 1
-          fi
-
-          awk -v tag="$TAG_NAME" '
-            $0 ~ "^## " tag "([[:space:]]|-|$)" {capture=1; next}
-            capture && /^## / {exit}
-            capture {print}
-          ' CHANGELOG.md > release-notes.md
-
-          if ! grep -q '[^[:space:]]' release-notes.md; then
-            echo "Release $TAG_NAME" > release-notes.md
-          fi
-
-          echo "RELEASE_TITLE=$title" >> "$GITHUB_ENV"
+          version="${TAG_NAME#v}"
+          for attempt in $(seq 1 30); do
+            core="$(curl --fail --silent https://api.nuget.org/v3-flatcontainer/logister/index.json)"
+            web="$(curl --fail --silent https://api.nuget.org/v3-flatcontainer/logister.aspnetcore/index.json)"
+            if echo "$core" | grep -q "\"${version}\"" && echo "$web" | grep -q "\"${version}\""; then
+              mkdir -p artifacts/verified
+              curl --fail --silent --location \
+                "https://api.nuget.org/v3-flatcontainer/logister/${version}/logister.${version}.nupkg" \
+                --output "artifacts/verified/Logister.${version}.nupkg"
+              curl --fail --silent --location \
+                "https://api.nuget.org/v3-flatcontainer/logister.aspnetcore/${version}/logister.aspnetcore.${version}.nupkg" \
+                --output "artifacts/verified/Logister.AspNetCore.${version}.nupkg"
+              cmp "artifacts/packages/Logister.${version}.nupkg" "artifacts/verified/Logister.${version}.nupkg"
+              cmp "artifacts/packages/Logister.AspNetCore.${version}.nupkg" "artifacts/verified/Logister.AspNetCore.${version}.nupkg"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::Both NuGet packages were not visible within the verification window."
+          exit 1
 
       - name: Create or update GitHub release
         env:

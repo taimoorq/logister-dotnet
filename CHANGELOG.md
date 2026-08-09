@@ -2,6 +2,11 @@
 
 All notable changes to `logister-dotnet` will be documented in this file.
 
+## v0.2.1 - 2026-08-09
+
+- Send the canonical `occurred_at` field for monitor check-ins so Logister preserves caller-supplied timestamps.
+- Keep both NuGet package versions and the default SDK user agent aligned for the release.
+
 ## v0.2.0 - 2026-07-25
 
 - Added .NET 10 targets while retaining .NET 8 compatibility for the SDK, ASP.NET Core integration, and tests.
