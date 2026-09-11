@@ -366,3 +366,52 @@ curl -fsSL https://api.nuget.org/v3-flatcontainer/logister/index.json
 curl -fsSL https://api.nuget.org/v3-flatcontainer/logister.aspnetcore/index.json
 gh release view vX.Y.Z
 ```
+
+
+### Coordinated release preparation
+
+For a coordinated ecosystem release, keep the version-changing PR unmerged until
+the final agreed Rails PR has been published and its deployment verified. Recheck
+the upstream contract/workflow pin against that final backend commit before merge.
+Successful source CI, a tag, or a release-impact dispatch alone is not backend readiness.
+After independent review, merging the new version runs CI, creates an immutable tag,
+and explicitly dispatches publication. A tag without a package remains incomplete.
+
+To recover an existing reviewed tag, dispatch the publisher workflow from `main`
+with `-f tag=vX.Y.Z` (Python uses `publish.yml`; other SDKs use `release.yml`). The
+workflow checks out that exact tag, proves it belongs to main, and verifies public
+package identity before creating the GitHub Release. Never move a consumed tag.
+
+Weekly CI audits/tests current dependencies and cannot trigger automatic publication.
+Dependabot groups compatible minor/patch updates; major toolchain migrations keep
+separate PRs. Pin Actions to full commits and retain supported runtime floors.
+
+
+### Reliable event delivery
+
+```csharp
+var prepared = client.PrepareEvent("log", "info", "Job started");
+await client.SendPreparedEventAsync(prepared, cancellationToken);
+var results = await client.SendEventsAsync(new[] { prepared }, cancellationToken);
+foreach (var result in results)
+    if (result.Error is not null) Console.WriteLine($"{result.EventId}: {result.Error.GetType().Name}");
+```
+
+Prepared events retain serialized context, UUID and capture time across retries and
+explicit replay. Ingestion retries transient network/HTTP failures up to three times;
+`LogisterOptions.RetryPolicy` controls the attempt limit, capped Retry-After/backoff,
+and the default 15-second total deadline. One batch call shares that deadline across
+all chunks, splits and fallback. `maximumAttempts: 1` disables retries.
+
+Batches accept at most 1,000 prepared events and send at most 100 per request. Each
+result identifies an accepted or failed/unsent event. Cancellation interrupts the
+call and propagates; retain the prepared input to safely replay after cancellation.
+Acceptance does not mean projection has completed. Dedicated check-ins and
+deployment writes retain their single-request behavior.
+
+NuGet.org adds a repository signature; .NET 10's packer also generates opaque
+core-properties IDs. Release verification authenticates the downloaded signature,
+compares every package content byte, and normalizes only those generated metadata
+IDs. DLLs, nuspecs, README and complete core-property values must match. A different
+compiler/build output fails verification and requires recovery with the original
+build environment or a new version; it is never silently accepted as equivalent.

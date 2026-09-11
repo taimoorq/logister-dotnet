@@ -7,6 +7,11 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 var tests = new (string Name, Func<Task> Run)[]
 {
+    ("prepared retries preserve identity and bytes", DeliveryTests.SnapshotRetries),
+    ("delivery failures are bounded", DeliveryTests.BoundedFailures),
+    ("batch fallback reports every result", DeliveryTests.BatchFallback),
+    ("batch splitting and chunks preserve outcomes", DeliveryTests.BatchSplittingAndChunks),
+    ("cancellation and retry deadlines stop delivery", DeliveryTests.CancellationAndDeadline),
     ("capture exception sends structured .NET context", CaptureExceptionSendsStructuredContext),
     ("capture metric sends metric value and unit", CaptureMetricSendsMetricContext),
     ("capture span sends trace timing payload", CaptureSpanSendsTraceTimingPayload),

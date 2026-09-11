@@ -14,8 +14,11 @@ permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   release:
@@ -25,7 +28,11 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Verify immutable tag belongs to reviewed main
+        run: bash scripts/verify-release-ref.sh
 
       - name: Check public repository safety
         run: bash scripts/publication-safety-check.sh
@@ -63,7 +70,9 @@ jobs:
         run: dotnet restore Logister.sln
 
       - name: Audit dependencies
-        run: dotnet list Logister.sln package --vulnerable --include-transitive --no-restore
+        run: |
+          dotnet list Logister.sln package --vulnerable --include-transitive --no-restore --format json > dependency-audit.json
+          python3 scripts/check-dependency-audit.py dependency-audit.json
 
       - name: Build Logister
         run: dotnet build src/Logister/Logister.csproj --configuration Release --no-restore -v minimal
@@ -168,8 +177,9 @@ jobs:
               curl --fail --silent --location \
                 "https://api.nuget.org/v3-flatcontainer/logister.aspnetcore/${version}/logister.aspnetcore.${version}.nupkg" \
                 --output "artifacts/verified/Logister.AspNetCore.${version}.nupkg"
-              cmp "artifacts/packages/Logister.${version}.nupkg" "artifacts/verified/Logister.${version}.nupkg"
-              cmp "artifacts/packages/Logister.AspNetCore.${version}.nupkg" "artifacts/verified/Logister.AspNetCore.${version}.nupkg"
+              dotnet nuget verify --all artifacts/verified/*.nupkg
+              python3 scripts/verify-nuget-payload.py "artifacts/packages/Logister.${version}.nupkg" "artifacts/verified/Logister.${version}.nupkg"
+              python3 scripts/verify-nuget-payload.py "artifacts/packages/Logister.AspNetCore.${version}.nupkg" "artifacts/verified/Logister.AspNetCore.${version}.nupkg"
               exit 0
             fi
             sleep 10

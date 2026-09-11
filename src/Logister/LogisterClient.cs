@@ -5,7 +5,7 @@ using System.Text.Json.Serialization;
 
 namespace Logister;
 
-public sealed class LogisterClient : IDisposable
+public sealed partial class LogisterClient : IDisposable
 {
     private const string IngestPath = "/api/v1/ingest_events";
     private const string CheckInPath = "/api/v1/check_ins";
@@ -223,28 +223,7 @@ public sealed class LogisterClient : IDisposable
         CaptureOptions? options = null,
         CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(eventType);
-        ArgumentException.ThrowIfNullOrWhiteSpace(level);
-        ArgumentException.ThrowIfNullOrWhiteSpace(message);
-
-        var eventContext = BuildContext(
-            context,
-            environment: options?.Environment,
-            release: options?.Release,
-            traceId: options?.TraceId,
-            requestId: options?.RequestId,
-            sessionId: options?.SessionId,
-            userId: options?.UserId);
-
-        var payload = new IngestEnvelope(new IngestEventPayload(
-            EventType: eventType,
-            Level: level,
-            Message: message,
-            Fingerprint: fingerprint,
-            OccurredAt: NormalizeTimestamp(occurredAt),
-            Context: eventContext));
-
-        return PostJsonAsync(IngestPath, payload, cancellationToken);
+        return SendPreparedEventAsync(PrepareEvent(eventType, level, message, context, fingerprint, occurredAt, options), cancellationToken);
     }
 
     public Task<LogisterResponse> CheckInAsync(
@@ -319,41 +298,11 @@ public sealed class LogisterClient : IDisposable
         }
     }
 
-    private async Task<LogisterResponse> PostJsonAsync(
-        string path,
-        object payload,
-        CancellationToken cancellationToken)
+    private Task<LogisterResponse> PostJsonAsync(string path, object payload, CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(_options.BaseUrl, path));
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _options.ApiKey);
-        request.Headers.TryAddWithoutValidation("User-Agent", _options.UserAgent);
-        request.Content = new StringContent(JsonSerializer.Serialize(payload, JsonOptions), Encoding.UTF8, "application/json");
-
-        using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
-        var responseBody = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-
-        if (!response.IsSuccessStatusCode)
-        {
-            throw new LogisterException(
-                $"Logister request failed with status {(int)response.StatusCode}: {responseBody}",
-                response.StatusCode,
-                responseBody);
-        }
-
-        if (string.IsNullOrWhiteSpace(responseBody))
-        {
-            return new LogisterResponse(null, null, "accepted");
-        }
-
-        try
-        {
-            return JsonSerializer.Deserialize<LogisterResponse>(responseBody, JsonOptions) ??
-                new LogisterResponse(null, null, "accepted");
-        }
-        catch (JsonException)
-        {
-            return new LogisterResponse(null, null, "accepted");
-        }
+        if (payload is IngestEnvelope envelope)
+            payload = envelope with { Event = envelope.Event with { Uuid = envelope.Event.Uuid ?? Guid.NewGuid() } };
+        return PostBytesAsync(path, JsonSerializer.SerializeToUtf8Bytes(payload, JsonOptions), "application/json", cancellationToken);
     }
 
     private Dictionary<string, object?> BuildContext(
@@ -464,7 +413,8 @@ public sealed class LogisterClient : IDisposable
         [property: JsonPropertyName("kind")] string? Kind = null,
         [property: JsonPropertyName("status")] string? Status = null,
         [property: JsonPropertyName("started_at")] string? StartedAt = null,
-        [property: JsonPropertyName("ended_at")] string? EndedAt = null);
+        [property: JsonPropertyName("ended_at")] string? EndedAt = null,
+        [property: JsonPropertyName("uuid")] Guid? Uuid = null);
 
     private sealed record CheckInEnvelope([property: JsonPropertyName("check_in")] CheckInPayload CheckIn);
 

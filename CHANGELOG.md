@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.3.0 - 2026-09-11
+
+- Added immutable prepared events with stable UUIDs and capture timestamps, ingestion-only bounded retries, Retry-After handling, and cancellation-aware replay.
+- Added bounded gzip/NDJSON batches, deterministic batch IDs, 413 splitting, legacy fallback, and ordered per-event outcomes without skipping later chunks after a failure.
+- Restored explicit publication dispatch and immutable-tag recovery for both NuGet packages.
+- Made vulnerability reports fail CI when transitive dependencies are affected and verified NuGet signatures plus package content instead of comparing signed and unsigned ZIP bytes.
+
 All notable changes to `logister-dotnet` will be documented in this file.
 
 ## v0.2.1 - 2026-08-09
