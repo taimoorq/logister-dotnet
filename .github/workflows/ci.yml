@@ -1,6 +1,9 @@
 name: CI
 
 on:
+  schedule:
+    - cron: "23 8 * * 1"
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -17,6 +20,9 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Test release recovery controls
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
+
       - name: Check public repository safety
         run: bash scripts/publication-safety-check.sh
 
@@ -31,7 +37,9 @@ jobs:
         run: dotnet restore Logister.sln
 
       - name: Audit dependencies
-        run: dotnet list Logister.sln package --vulnerable --include-transitive --no-restore
+        run: |
+          dotnet list Logister.sln package --vulnerable --include-transitive --no-restore --format json > dependency-audit.json
+          python3 scripts/check-dependency-audit.py dependency-audit.json
 
       - name: Build Logister
         run: dotnet build src/Logister/Logister.csproj --configuration Release --no-restore -v minimal
