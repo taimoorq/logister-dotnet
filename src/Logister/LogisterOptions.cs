@@ -14,7 +14,7 @@ public sealed class LogisterOptions
         new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
     public bool CaptureExceptionData { get; set; } = true;
     public RetryPolicy RetryPolicy { get; set; } = new();
-    public string UserAgent { get; set; } = "logister-dotnet/0.3.0";
+    public string UserAgent { get; set; } = "logister-dotnet/0.4.0";
 
     public static LogisterOptions FromEnvironment()
     {

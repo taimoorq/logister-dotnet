@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -165,7 +166,10 @@ public sealed partial class LogisterClient : IDisposable
         options ??= new SpanOptions();
 
         var spanId = FirstPresent(options.SpanId, NewSpanId())!;
-        var traceId = FirstPresent(options.TraceId, options.RequestId, spanId);
+        var active = LogisterTraceContext.Current;
+        var traceId = FirstPresent(options.TraceId, active?.TraceId, ActivityTraceId.CreateRandom().ToHexString());
+        var requestId = FirstPresent(options.RequestId, active?.RequestId);
+        var parentSpanId = FirstPresent(options.ParentSpanId, spanId == active?.SpanId ? active.ParentSpanId : active?.SpanId);
         var kind = FirstPresent(options.Kind, "internal")!;
         var startedAt = options.StartedAt ?? options.OccurredAt ?? DateTimeOffset.UtcNow;
 
@@ -173,9 +177,9 @@ public sealed partial class LogisterClient : IDisposable
         MergeContext(context, options.Context);
         SetIfMissing(context, "name", name);
         SetIfMissing(context, "trace_id", traceId);
-        SetIfMissing(context, "request_id", options.RequestId);
+        SetIfMissing(context, "request_id", requestId);
         SetIfMissing(context, "span_id", spanId);
-        SetIfMissing(context, "parent_span_id", options.ParentSpanId);
+        SetIfMissing(context, "parent_span_id", parentSpanId);
         SetIfMissing(context, "span_kind", kind);
         SetIfMissing(context, "kind", kind);
         SetIfMissing(context, "status", options.Status);
@@ -188,7 +192,7 @@ public sealed partial class LogisterClient : IDisposable
             environment: options.Environment,
             release: options.Release,
             traceId: traceId,
-            requestId: options.RequestId,
+            requestId: requestId,
             sessionId: options.SessionId,
             userId: options.UserId);
 
@@ -202,9 +206,9 @@ public sealed partial class LogisterClient : IDisposable
             Name: name,
             DurationMs: durationMs,
             TraceId: traceId,
-            RequestId: options.RequestId,
+            RequestId: requestId,
             SpanId: spanId,
-            ParentSpanId: options.ParentSpanId,
+            ParentSpanId: parentSpanId,
             Kind: kind,
             Status: options.Status,
             StartedAt: NormalizeTimestamp(startedAt),
@@ -327,6 +331,9 @@ public sealed partial class LogisterClient : IDisposable
         SetIfMissing(merged, "request_id", requestId);
         SetIfMissing(merged, "session_id", sessionId);
         SetIfMissing(merged, "user_id", userId);
+        var active = LogisterTraceContext.Current;
+        if (active is not null)
+            foreach (var field in active.Fields()) SetIfMissing(merged, field.Key, field.Value);
         SetIfMissing(merged, "runtime", ".NET");
         SetIfMissing(merged, "dotnet_version", System.Environment.Version.ToString());
         SetIfMissing(merged, "framework_description", System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription);

@@ -33,7 +33,9 @@ internal static class LogisterHttpContext
             ["query_string"] = request.QueryString.HasValue ? request.QueryString.Value : null,
             ["url"] = BuildDisplayUrl(request),
             ["request_id"] = context.TraceIdentifier,
-            ["trace_id"] = Activity.Current?.TraceId.ToString(),
+            ["span_id"] = LogisterTraceContext.Current?.SpanId,
+            ["parent_span_id"] = LogisterTraceContext.Current?.ParentSpanId,
+            ["trace_id"] = LogisterTraceContext.Current?.TraceId,
             ["client_ip"] = context.Connection.RemoteIpAddress?.ToString(),
             ["user_agent"] = request.Headers.UserAgent.ToString(),
             ["route"] = routeValues.Count > 0 ? routeValues : null,
@@ -68,7 +70,9 @@ internal static class LogisterHttpContext
                 .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase),
             ["route"] = context.GetEndpoint()?.DisplayName ?? request.Path.Value,
             ["request_id"] = context.TraceIdentifier,
-            ["trace_id"] = Activity.Current?.TraceId.ToString()
+            ["span_id"] = LogisterTraceContext.Current?.SpanId,
+            ["parent_span_id"] = LogisterTraceContext.Current?.ParentSpanId,
+            ["trace_id"] = LogisterTraceContext.Current?.TraceId
         };
 
         if (durationMs is not null)

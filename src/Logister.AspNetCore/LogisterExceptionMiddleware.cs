@@ -24,6 +24,7 @@ public sealed class LogisterExceptionMiddleware
 
     public async Task InvokeAsync(HttpContext context)
     {
+        using var traceScope = new LogisterRequestScope(context.TraceIdentifier, context.Request.Headers["traceparent"].ToString());
         try
         {
             await _next(context);

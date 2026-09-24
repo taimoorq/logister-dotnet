@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 var tests = new (string Name, Func<Task> Run)[]
 {
+    ("request tracing reuses native Activity and restores scope", RequestTracingPreservesActivity),
     ("prepared retries preserve identity and bytes", DeliveryTests.SnapshotRetries),
     ("delivery failures are bounded", DeliveryTests.BoundedFailures),
     ("batch fallback reports every result", DeliveryTests.BatchFallback),
@@ -41,6 +42,31 @@ foreach (var test in tests)
 if (failures > 0)
 {
     Environment.ExitCode = 1;
+}
+
+static async Task RequestTracingPreservesActivity()
+{
+    using var native = new System.Diagnostics.Activity("native request").SetIdFormat(System.Diagnostics.ActivityIdFormat.W3C)
+        .SetParentId("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01").Start();
+    using (var scope = new LogisterRequestScope("request-1"))
+    {
+        AssertTrue(ReferenceEquals(native, System.Diagnostics.Activity.Current), "Must reuse the native Activity");
+        var trace = LogisterTraceContext.Current!;
+        AssertEqual("4bf92f3577b34da6a3ce929d0e0e4736", trace.TraceId);
+        AssertEqual("00f067aa0ba902b7", trace.ParentSpanId);
+        var handler = new RecordingHandler();
+        using var client = BuildClient(handler);
+        await Task.Yield();
+        await client.CaptureExceptionAsync(new Exception("failure"));
+        var context = handler.LastJson.RootElement.GetProperty("event").GetProperty("context");
+        AssertEqual(trace.SpanId, context.GetProperty("span_id").GetString());
+        AssertEqual(trace.RequestId, context.GetProperty("request_id").GetString());
+        var child = trace.Child();
+        AssertEqual(trace.SpanId, child.ParentSpanId);
+        AssertEqual(0, child.HeadersFor(new Uri("https://other.example"), new[] { new Uri("https://api.example") }).Count);
+    }
+    AssertTrue(ReferenceEquals(native, System.Diagnostics.Activity.Current), "Must restore the host Activity");
+    AssertEqual<string?>(null, LogisterTraceContext.Current?.RequestId);
 }
 
 static async Task CaptureExceptionSendsStructuredContext()

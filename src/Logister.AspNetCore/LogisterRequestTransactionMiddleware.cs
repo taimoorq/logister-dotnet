@@ -25,6 +25,7 @@ public sealed class LogisterRequestTransactionMiddleware
 
     public async Task InvokeAsync(HttpContext context)
     {
+        using var traceScope = new LogisterRequestScope(context.TraceIdentifier, context.Request.Headers["traceparent"].ToString());
         if (!_options.CaptureRequestTransactions && !_options.CaptureRequestSpans)
         {
             await _next(context);
@@ -32,26 +33,32 @@ public sealed class LogisterRequestTransactionMiddleware
         }
 
         var stopwatch = Stopwatch.StartNew();
+        var failed = false;
         try
         {
             await _next(context);
+        }
+        catch
+        {
+            failed = true;
+            throw;
         }
         finally
         {
             stopwatch.Stop();
             if (_options.CaptureRequestTransactions)
             {
-                await CaptureTransactionAsync(context, stopwatch.Elapsed.TotalMilliseconds);
+                await CaptureTransactionAsync(context, stopwatch.Elapsed.TotalMilliseconds, failed);
             }
 
             if (_options.CaptureRequestSpans)
             {
-                await CaptureSpanAsync(context, stopwatch.Elapsed.TotalMilliseconds);
+                await CaptureSpanAsync(context, stopwatch.Elapsed.TotalMilliseconds, failed);
             }
         }
     }
 
-    private async Task CaptureTransactionAsync(HttpContext context, double durationMs)
+    private async Task CaptureTransactionAsync(HttpContext context, double durationMs, bool failed)
     {
         try
         {
@@ -61,8 +68,8 @@ public sealed class LogisterRequestTransactionMiddleware
                 durationMs,
                 new CaptureOptions
                 {
-                    Level = context.Response.StatusCode >= 500 ? "error" : "info",
-                    Context = LogisterHttpContext.BuildContext(context, _options, durationMs),
+                    Level = (failed || context.Response.StatusCode >= 500) ? "error" : "info",
+                    Context = LogisterHttpContext.BuildContext(context, _options, durationMs, failed ? 500 : null),
                     RequestId = context.TraceIdentifier,
                     TraceId = Activity.Current?.TraceId.ToString(),
                     UserId = context.User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
@@ -75,7 +82,7 @@ public sealed class LogisterRequestTransactionMiddleware
         }
     }
 
-    private async Task CaptureSpanAsync(HttpContext context, double durationMs)
+    private async Task CaptureSpanAsync(HttpContext context, double durationMs, bool failed)
     {
         try
         {
@@ -87,12 +94,12 @@ public sealed class LogisterRequestTransactionMiddleware
                 new SpanOptions
                 {
                     Kind = "server",
-                    Status = context.Response.StatusCode >= 500 ? "error" : "ok",
-                    Context = LogisterHttpContext.BuildContext(context, _options, durationMs),
+                    Status = (failed || context.Response.StatusCode >= 500) ? "error" : "ok",
+                    Context = LogisterHttpContext.BuildContext(context, _options, durationMs, failed ? 500 : null),
                     RequestId = context.TraceIdentifier,
                     TraceId = activity?.TraceId.ToString() ?? context.TraceIdentifier,
                     SpanId = activity?.SpanId.ToString(),
-                    ParentSpanId = activity?.ParentSpanId.ToString(),
+                    ParentSpanId = LogisterTraceContext.Current?.ParentSpanId,
                     UserId = context.User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
                 },
                 context.RequestAborted);
