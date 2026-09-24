@@ -415,3 +415,39 @@ compares every package content byte, and normalizes only those generated metadat
 IDs. DLLs, nuspecs, README and complete core-property values must match. A different
 compiler/build output fails verification and requires recovery with the original
 build environment or a new version; it is never silently accepted as equivalent.
+
+## Request correlation (0.4.0+)
+
+ASP.NET Core middleware reuses the current W3C `Activity` and creates a fallback
+request activity only when needed. Automatic and manual captures share the
+server span, request ID, and incoming parent. `LogisterTraceContext.Current`
+returns an immutable snapshot that can be retained across awaits.
+
+For transports without native Activity propagation, use a child handle:
+
+```csharp
+var trace = LogisterTraceContext.Current?.Child();
+var destination = new Uri("https://api.example.test/orders");
+if (trace is not null)
+{
+    var headers = trace.HeadersFor(destination, new[] { new Uri("https://api.example.test") });
+    // Apply to this request only; disable automatic redirects.
+    // Supply trace.Fields() as capture context if reporting its failure later.
+}
+```
+
+Native HttpClient/Activity instrumentation remains the owner of its outbound
+spans. Do not layer manual header injection over a native instrumented client.
+The helper validates an exact origin; recheck each redirect, and exclude telemetry
+and token endpoints. It does not configure native HttpClient propagation policy.
+
+A linked-project lookup also requires Logister 3.7+, the instance flag
+`LOGISTER_CROSS_PROJECT_CORRELATIONS=true`, and explicit project/environment
+connections under Settings → Integrations → Connected projects. Enable related
+requests on both projects. A connection never grants project access.
+
+Use the returned request handle when reporting a handled HTTP failure later.
+Do not attach the most recent request to an unrelated crash or OS diagnostic.
+Configure each app's own `release` and `environment`; mobile and backend releases
+are independent. The backend shows exact identifier evidence and retention gaps.
+See the [request correlation guide](https://logister.org/docs/request-correlation/).

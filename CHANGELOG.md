@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.4.0 - 2026-09-24
+
+- Reuse native W3C Activity identities across ASP.NET Core automatic and manual telemetry.
+- Add immutable request snapshots and allowlisted header helpers; preserve application response behavior on failed requests.
+
 ## v0.3.0 - 2026-09-11
 
 - Added immutable prepared events with stable UUIDs and capture timestamps, ingestion-only bounded retries, Retry-After handling, and cancellation-aware replay.
