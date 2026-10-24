@@ -237,7 +237,7 @@ Other privacy-relevant defaults:
 
 - `client_ip` and forwarding headers are opt-in (`CaptureClientIp`).
 - `machine_name` and `process_id` are opt-in (`LogisterOptions.CaptureHostIdentity`, `Logister:CaptureHostIdentity`).
-- Stack frames include the file paths recorded in your PDBs, which can be absolute build-machine paths such as `/home/alice/src/app/Checkout.cs`. Logister uses them, together with the project's runtime root, to link frames to GitHub source. To avoid publishing build-machine paths, build your app with `<ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>` (paths are then recorded under the deterministic `/_/` root) or a `<PathMap>`, and set the matching runtime root in Logister.
+- Stack frames include the file paths recorded in your PDBs, which can be absolute build-machine paths such as `<build-root>/src/app/Checkout.cs`, where the build root can include a user name. Logister uses them, together with the project's runtime root, to link frames to GitHub source. To avoid publishing build-machine paths, build your app with `<ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>` (paths are then recorded under the deterministic `/_/` root) or a `<PathMap>`, and set the matching runtime root in Logister.
 - `CaptureExceptionData` (default `true`) controls whether `Exception.Data` is sent at all.
 
 Captured values are also bounded: nesting deeper than 12 levels becomes `[MaxDepth]`, collections keep their first 200 items, reference cycles become `[Circular]`, and `IQueryable` or lazy `IEnumerable` values are reported by type name or `ToString()` instead of being enumerated.
