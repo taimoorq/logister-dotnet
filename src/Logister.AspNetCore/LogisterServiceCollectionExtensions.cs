@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Logister.AspNetCore;
 
@@ -18,6 +19,8 @@ public static class LogisterServiceCollectionExtensions
 
         services.AddSingleton(options);
         services.AddSingleton(options.Client);
+        services.TryAddSingleton(serviceProvider => new LogisterEventQueue(serviceProvider.GetRequiredService<LogisterAspNetCoreOptions>()));
+        services.AddHostedService<LogisterDeliveryService>();
         services.AddHttpClient<LogisterClient>((serviceProvider, httpClient) =>
         {
             var clientOptions = serviceProvider.GetRequiredService<LogisterOptions>();
@@ -33,13 +36,48 @@ public static class LogisterServiceCollectionExtensions
     private static void ApplyConfiguration(LogisterAspNetCoreOptions options, IConfiguration section)
     {
         SetIfPresent(section, "ApiKey", value => options.Client.ApiKey = value);
-        SetIfPresent(section, "BaseUrl", value =>
+        SetIfPresent(section, "BaseUrl", value => options.Client.BaseUrl = LogisterOptions.ParseBaseUrl(value, "Logister:BaseUrl"));
+        SetIfPresent(section, "AllowInsecureHttp", value =>
         {
-            if (Uri.TryCreate(value, UriKind.Absolute, out var uri))
+            if (bool.TryParse(value, out var parsed))
             {
-                options.Client.BaseUrl = uri;
+                options.Client.AllowInsecureHttp = parsed;
             }
         });
+        SetIfPresent(section, "CaptureHostIdentity", value =>
+        {
+            if (bool.TryParse(value, out var parsed))
+            {
+                options.Client.CaptureHostIdentity = parsed;
+            }
+        });
+        SetIfPresent(section, "CaptureClientIp", value =>
+        {
+            if (bool.TryParse(value, out var parsed))
+            {
+                options.CaptureClientIp = parsed;
+            }
+        });
+        SetIfPresent(section, "TransactionSampleRate", value =>
+        {
+            if (!double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var rate))
+            {
+                throw new LogisterConfigurationException("Logister:TransactionSampleRate must be a number between 0 and 1.");
+            }
+
+            options.TransactionSampleRate = rate;
+        });
+        SetIfPresent(section, "QueueCapacity", value =>
+        {
+            if (int.TryParse(value, out var capacity) && capacity > 0)
+            {
+                options.QueueCapacity = capacity;
+            }
+        });
+        AddAll(section, "RedactKeys", options.Client.RedactKeys);
+        AddAll(section, "AllowedRequestCookieNames", options.AllowedRequestCookieNames);
+        AddAll(section, "SensitiveRequestCookieNames", options.SensitiveRequestCookieNames);
+        AddAll(section, "SensitiveRequestHeaderNames", options.SensitiveRequestHeaderNames);
         SetIfPresent(section, "Environment", value => options.Client.Environment = value);
         SetIfPresent(section, "Release", value => options.Client.Release = value);
         SetIfPresent(section, "Repository", value => options.Client.Repository = value);
@@ -89,6 +127,19 @@ public static class LogisterServiceCollectionExtensions
                 options.Client.CaptureExceptionData = parsed;
             }
         });
+    }
+
+    // Accepts either a JSON array or a comma-separated string.
+    private static void AddAll(IConfiguration section, string key, ISet<string> target)
+    {
+        var child = section.GetSection(key);
+        var values = child.Value is not null
+            ? child.Value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            : child.GetChildren().Select(item => item.Value?.Trim()).Where(item => !string.IsNullOrEmpty(item));
+        foreach (var value in values)
+        {
+            target.Add(value!);
+        }
     }
 
     private static void SetIfPresent(IConfiguration section, string key, Action<string> apply)

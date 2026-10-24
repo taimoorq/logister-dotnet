@@ -20,6 +20,8 @@ public sealed partial class LogisterClient : IDisposable
     private readonly LogisterOptions _options;
     private readonly HttpClient _httpClient;
     private readonly bool _disposeHttpClient;
+    private readonly Uri _baseUrl;
+    private readonly LogisterValueSanitizer _sanitizer;
 
     public LogisterClient(LogisterOptions options)
         : this(options, new HttpClient(), disposeHttpClient: true)
@@ -39,13 +41,12 @@ public sealed partial class LogisterClient : IDisposable
 
         if (string.IsNullOrWhiteSpace(_options.ApiKey))
         {
-            throw new ArgumentException("Logister requires an API key.", nameof(options));
+            throw new LogisterConfigurationException(
+                "Logister requires an API key. Set LogisterOptions.ApiKey, the Logister:ApiKey setting, or LOGISTER_API_KEY.");
         }
 
-        if (_options.BaseUrl is null)
-        {
-            throw new ArgumentException("Logister requires a base URL.", nameof(options));
-        }
+        _baseUrl = _options.ValidatedBaseUrl();
+        _sanitizer = new LogisterValueSanitizer(_options.RedactKeys);
 
         if (_options.Timeout > TimeSpan.Zero && _disposeHttpClient)
         {
@@ -58,6 +59,12 @@ public sealed partial class LogisterClient : IDisposable
         CaptureOptions? options = null,
         CancellationToken cancellationToken = default)
     {
+        return SendPreparedEventAsync(PrepareException(exception, options), cancellationToken);
+    }
+
+    /// <summary>Builds and serializes an error event without sending it.</summary>
+    public PreparedEvent PrepareException(Exception exception, CaptureOptions? options = null)
+    {
         ArgumentNullException.ThrowIfNull(exception);
         options ??= new CaptureOptions();
 
@@ -67,15 +74,14 @@ public sealed partial class LogisterClient : IDisposable
             exception,
             includeData: _options.CaptureExceptionData);
 
-        return SendEventAsync(
+        return PrepareEvent(
             eventType: "error",
             level: options.Level ?? "error",
             message: options.Message ?? FirstPresent(exception.Message, exception.GetType().Name) ?? "Exception",
             context: context,
             fingerprint: options.Fingerprint,
             occurredAt: options.OccurredAt,
-            options: options,
-            cancellationToken: cancellationToken);
+            options: options);
     }
 
     public Task<LogisterResponse> CaptureMessageAsync(
@@ -137,6 +143,12 @@ public sealed partial class LogisterClient : IDisposable
         CaptureOptions? options = null,
         CancellationToken cancellationToken = default)
     {
+        return SendPreparedEventAsync(PrepareTransaction(name, durationMs, options), cancellationToken);
+    }
+
+    /// <summary>Builds and serializes a transaction event without sending it.</summary>
+    public PreparedEvent PrepareTransaction(string name, double durationMs, CaptureOptions? options = null)
+    {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         options ??= new CaptureOptions();
 
@@ -145,15 +157,14 @@ public sealed partial class LogisterClient : IDisposable
         context.TryAdd("transaction_name", name);
         context.TryAdd("duration_ms", durationMs);
 
-        return SendEventAsync(
+        return PrepareEvent(
             eventType: "transaction",
             level: options.Level ?? "info",
             message: name,
             context: context,
             fingerprint: options.Fingerprint,
             occurredAt: options.OccurredAt,
-            options: options,
-            cancellationToken: cancellationToken);
+            options: options);
     }
 
     public Task<LogisterResponse> CaptureSpanAsync(
@@ -161,6 +172,12 @@ public sealed partial class LogisterClient : IDisposable
         double durationMs,
         SpanOptions? options = null,
         CancellationToken cancellationToken = default)
+    {
+        return SendPreparedEventAsync(PrepareSpan(name, durationMs, options), cancellationToken);
+    }
+
+    /// <summary>Builds and serializes a span event without sending it.</summary>
+    public PreparedEvent PrepareSpan(string name, double durationMs, SpanOptions? options = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         options ??= new SpanOptions();
@@ -196,14 +213,16 @@ public sealed partial class LogisterClient : IDisposable
             sessionId: options.SessionId,
             userId: options.UserId);
 
+        var id = Guid.NewGuid();
+        var occurredAt = options.OccurredAt ?? startedAt;
         var payload = new IngestEnvelope(new IngestEventPayload(
             EventType: "span",
             Level: options.Level ?? (string.Equals(options.Status, "error", StringComparison.OrdinalIgnoreCase) ? "error" : "info"),
-            Message: options.Message ?? name,
+            Message: _sanitizer.ScrubString(options.Message ?? name),
             Fingerprint: options.Fingerprint,
-            OccurredAt: NormalizeTimestamp(options.OccurredAt ?? startedAt),
+            OccurredAt: NormalizeTimestamp(occurredAt),
             Context: eventContext,
-            Name: name,
+            Name: _sanitizer.ScrubString(name),
             DurationMs: durationMs,
             TraceId: traceId,
             RequestId: requestId,
@@ -212,9 +231,10 @@ public sealed partial class LogisterClient : IDisposable
             Kind: kind,
             Status: options.Status,
             StartedAt: NormalizeTimestamp(startedAt),
-            EndedAt: NormalizeOptionalTimestamp(options.EndedAt)));
+            EndedAt: NormalizeOptionalTimestamp(options.EndedAt),
+            Uuid: id));
 
-        return PostJsonAsync(IngestPath, payload, cancellationToken);
+        return new PreparedEvent(id, occurredAt, JsonSerializer.Serialize(payload, JsonOptions));
     }
 
     public Task<LogisterResponse> SendEventAsync(
@@ -304,8 +324,6 @@ public sealed partial class LogisterClient : IDisposable
 
     private Task<LogisterResponse> PostJsonAsync(string path, object payload, CancellationToken cancellationToken)
     {
-        if (payload is IngestEnvelope envelope)
-            payload = envelope with { Event = envelope.Event with { Uuid = envelope.Event.Uuid ?? Guid.NewGuid() } };
         return PostBytesAsync(path, JsonSerializer.SerializeToUtf8Bytes(payload, JsonOptions), "application/json", cancellationToken);
     }
 
@@ -338,10 +356,13 @@ public sealed partial class LogisterClient : IDisposable
         SetIfMissing(merged, "dotnet_version", System.Environment.Version.ToString());
         SetIfMissing(merged, "framework_description", System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription);
         SetIfMissing(merged, "os_description", System.Runtime.InteropServices.RuntimeInformation.OSDescription);
-        SetIfMissing(merged, "process_id", System.Environment.ProcessId);
-        SetIfMissing(merged, "machine_name", System.Environment.MachineName);
+        if (_options.CaptureHostIdentity)
+        {
+            SetIfMissing(merged, "process_id", System.Environment.ProcessId);
+            SetIfMissing(merged, "machine_name", System.Environment.MachineName);
+        }
 
-        return merged;
+        return _sanitizer.SanitizeContext(merged);
     }
 
     private static void MergeContext(

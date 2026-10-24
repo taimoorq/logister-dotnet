@@ -20,7 +20,24 @@ var tests = new (string Name, Func<Task> Run)[]
     ("deployment records use deployment endpoint", DeploymentRecordUsesDeploymentEndpoint),
     ("ASP.NET Core exception middleware reports and rethrows", AspNetCoreExceptionMiddlewareReportsAndRethrows),
     ("ASP.NET Core request middleware can capture spans", AspNetCoreRequestMiddlewareCanCaptureSpans),
-    ("ASP.NET Core request cookies are captured only when enabled", AspNetCoreRequestCookiesAreCapturedOnlyWhenEnabled)
+    ("ASP.NET Core request cookies are captured only when enabled", AspNetCoreRequestCookiesAreCapturedOnlyWhenEnabled),
+    ("redaction fixtures follow the shared key and value rules", SecurityTests.RedactionFixtures),
+    ("client redacts context, messages and exception data", SecurityTests.ClientRedactsCapturedValues),
+    ("cyclic context does not overflow the stack", SecurityTests.CyclicContextIsBounded),
+    ("lazy sequences and IQueryable are never enumerated", SecurityTests.LazySequencesAreNotEnumerated),
+    ("normalizer bounds depth and collection size", SecurityTests.NormalizerBoundsDepthAndSize),
+    ("ASP.NET Core URL, query, route and client IP are redacted", SecurityTests.HttpContextRedactsRequestData),
+    ("ASP.NET Core sensitive headers are redacted", SecurityTests.SensitiveHeadersAreRedacted),
+    ("ASP.NET Core chunked and prefixed auth cookies are redacted", SecurityTests.AuthCookiesAreRedacted),
+    ("missing or unsafe base URL throws a configuration exception", SecurityTests.BaseUrlIsRequiredAndValidated),
+    ("ASP.NET Core configuration rejects invalid base URLs", SecurityTests.AspNetCoreConfigurationValidatesBaseUrl),
+    ("host identity fields are opt-in", SecurityTests.HostIdentityIsOptIn),
+    ("non-ingest calls honour the client timeout", SecurityTests.NonIngestCallsHonourTimeout),
+    ("retry backoff is jittered within bounds", SecurityTests.RetryBackoffIsJittered),
+    ("request is not delayed by a slow Logister server", SecurityTests.RequestIsNotDelayedBySlowServer),
+    ("transaction sampling skips unsampled requests", SecurityTests.TransactionSamplingSkipsRequests),
+    ("middleware never lets capture failures escape", SecurityTests.MiddlewareContainsCaptureFailures),
+    ("delivery service survives failures and flushes on shutdown", SecurityTests.DeliveryServiceSurvivesFailures)
 };
 
 var failures = 0;
@@ -231,10 +248,12 @@ static async Task AspNetCoreExceptionMiddlewareReportsAndRethrows()
     var client = BuildClient(handler);
     var options = new LogisterAspNetCoreOptions();
 
+    var queue = new LogisterEventQueue(10);
     var middleware = new LogisterExceptionMiddleware(
         _ => throw new InvalidOperationException("pipeline failed"),
         client,
         options,
+        queue,
         NullLogger<LogisterExceptionMiddleware>.Instance);
 
     var context = new DefaultHttpContext();
@@ -244,6 +263,7 @@ static async Task AspNetCoreExceptionMiddlewareReportsAndRethrows()
     context.TraceIdentifier = "trace-aspnet";
 
     await AssertThrowsAsync<InvalidOperationException>(() => middleware.InvokeAsync(context));
+    await DeliverQueued(queue, client);
 
     var payload = handler.LastJson.RootElement.GetProperty("event");
     AssertEqual("error", payload.GetProperty("event_type").GetString());
@@ -261,6 +281,7 @@ static async Task AspNetCoreRequestMiddlewareCanCaptureSpans()
     {
         CaptureRequestSpans = true
     };
+    var queue = new LogisterEventQueue(10);
     var middleware = new LogisterRequestTransactionMiddleware(
         context =>
         {
@@ -269,6 +290,7 @@ static async Task AspNetCoreRequestMiddlewareCanCaptureSpans()
         },
         client,
         options,
+        queue,
         NullLogger<LogisterRequestTransactionMiddleware>.Instance);
 
     var context = new DefaultHttpContext();
@@ -279,6 +301,7 @@ static async Task AspNetCoreRequestMiddlewareCanCaptureSpans()
     context.TraceIdentifier = "req-aspnet";
 
     await middleware.InvokeAsync(context);
+    await DeliverQueued(queue, client);
 
     var payload = handler.LastJson.RootElement.GetProperty("event");
     AssertEqual("span", payload.GetProperty("event_type").GetString());
@@ -293,14 +316,17 @@ static async Task AspNetCoreRequestCookiesAreCapturedOnlyWhenEnabled()
 {
     var defaultHandler = new RecordingHandler();
     var defaultClient = BuildClient(defaultHandler);
+    var defaultQueue = new LogisterEventQueue(10);
     var defaultMiddleware = new LogisterExceptionMiddleware(
         _ => throw new InvalidOperationException("pipeline failed"),
         defaultClient,
         new LogisterAspNetCoreOptions(),
+        defaultQueue,
         NullLogger<LogisterExceptionMiddleware>.Instance);
     var defaultContext = BuildCookieContext();
 
     await AssertThrowsAsync<InvalidOperationException>(() => defaultMiddleware.InvokeAsync(defaultContext));
+    await DeliverQueued(defaultQueue, defaultClient);
 
     var defaultRequest = defaultHandler.LastJson.RootElement
         .GetProperty("event")
@@ -314,14 +340,18 @@ static async Task AspNetCoreRequestCookiesAreCapturedOnlyWhenEnabled()
     {
         CaptureRequestCookies = true
     };
+    enabledOptions.AllowedRequestCookieNames.Add("theme");
+    var enabledQueue = new LogisterEventQueue(10);
     var enabledMiddleware = new LogisterExceptionMiddleware(
         _ => throw new InvalidOperationException("pipeline failed"),
         enabledClient,
         enabledOptions,
+        enabledQueue,
         NullLogger<LogisterExceptionMiddleware>.Instance);
     var enabledContext = BuildCookieContext();
 
     await AssertThrowsAsync<InvalidOperationException>(() => enabledMiddleware.InvokeAsync(enabledContext));
+    await DeliverQueued(enabledQueue, enabledClient);
 
     var cookies = enabledHandler.LastJson.RootElement
         .GetProperty("event")
@@ -329,7 +359,15 @@ static async Task AspNetCoreRequestCookiesAreCapturedOnlyWhenEnabled()
         .GetProperty("request")
         .GetProperty("cookies");
     AssertEqual("dark", cookies.GetProperty("theme").GetString());
-    AssertEqual("[Filtered]", cookies.GetProperty(".AspNetCore.Cookies").GetString());
+    AssertEqual("[REDACTED]", cookies.GetProperty(".AspNetCore.Cookies").GetString());
+}
+
+static async Task DeliverQueued(LogisterEventQueue queue, LogisterClient client)
+{
+    while (queue.Reader.TryRead(out var prepared))
+    {
+        await client.SendPreparedEventAsync(prepared);
+    }
 }
 
 static LogisterClient BuildClient(RecordingHandler handler, Action<LogisterOptions>? configure = null)
