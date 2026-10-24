@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.5.0 - 2026-10-23
+
+Security hardening release. It contains breaking changes; read the upgrade notes in the README.
+
+Breaking and default changes:
+
+- **Breaking:** `LogisterOptions.BaseUrl` no longer defaults to `https://logister.org` and is now `Uri?`. A missing base URL throws `LogisterConfigurationException` when the client is created (or at host startup for ASP.NET Core). An unparsable `LOGISTER_BASE_URL` or `Logister:BaseUrl` now throws instead of silently falling back to the vendor host.
+- **Breaking:** `http://` base URLs are rejected unless the host is loopback or `AllowInsecureHttp = true`. Base URLs with embedded credentials are rejected.
+- **Breaking:** ASP.NET Core middleware no longer awaits delivery. Events are prepared on the request thread, put on a bounded `LogisterEventQueue` (default 1,000 events, then dropped), and sent in batches of up to 100 by a hosted `LogisterDeliveryService` through `SendEventsAsync`. Both middleware constructors now take a `LogisterEventQueue`; `AddLogister` registers both.
+- Captured values are redacted by default with the shared Logister rules: sensitive keys (after lowercasing and removing non-alphanumerics) become `[REDACTED]`, and strings are scrubbed for `Bearer`/`Basic` credentials, JWTs, `lgst_` keys, URL passwords and sensitive query parameters. This applies to context, the event message, exception messages, `Exception.Data`, request URL, query string, referer, headers, cookies and route values. Add keys with `LogisterOptions.RedactKeys`, `Logister:RedactKeys` or `LOGISTER_REDACT_KEYS`.
+- `client_ip` and forwarding headers (`X-Forwarded-For`, `Forwarded`, `CF-Connecting-IP` and similar) are no longer captured unless `CaptureClientIp` is enabled.
+- `machine_name` and `process_id` are no longer sent unless `CaptureHostIdentity` is enabled.
+- Captured cookie values are redacted unless the name is in `AllowedRequestCookieNames`. `.AspNetCore.*`, chunked `…C1`/`…C2` cookies, `__Host-`/`__Secure-`, antiforgery, XSRF/CSRF, session and auth cookies stay redacted even when allowlisted. `RedactedCookieValue` now defaults to `[REDACTED]`.
+- Header capture applies the shared key rule to header names plus `x-functions-key`, `x-ms-client-principal*`, `x-ms-token-*`, IAP/Cloudflare JWT assertions and webhook signatures. Sensitive header values become `[REDACTED]`; add names with `SensitiveRequestHeaderNames`.
+
+Fixes and additions:
+
+- Normalization of captured values is bounded: depth 12, 5,000 values per captured value, 200 items per collection, and reference cycles become `[Circular]`. A self-referencing context or `Exception.Data` no longer crashes the process with a stack overflow. Only materialized collections are enumerated; `IQueryable` and lazy `IEnumerable` values are reported by type name or `ToString()` and never executed. `NaN`/`Infinity` no longer break serialization.
+- Added `TransactionSampleRate` (0–1) for ASP.NET Core request transactions and spans.
+- Retry backoff now has ±50% jitter (an explicit `Retry-After` is still honored as sent).
+- Every HTTP attempt, including check-ins and deployments, is bounded by `LogisterOptions.Timeout` even with a caller-supplied `HttpClient`.
+- Added public `PrepareException`, `PrepareTransaction` and `PrepareSpan` alongside `PrepareEvent`, and a public `LogisterValueSanitizer`.
+- Capture failures inside the middleware, including failing log providers, never replace the application's exception or response. The delivery service catches all delivery errors and flushes queued events for up to `ShutdownFlushTimeout` (default 5 s) on shutdown.
+- Packages are built deterministically with SourceLink, embedded PDBs, `ContinuousIntegrationBuild` in GitHub Actions and NuGet package validation.
+
 ## v0.4.0 - 2026-09-24
 
 - Reuse native W3C Activity identities across ASP.NET Core automatic and manual telemetry.

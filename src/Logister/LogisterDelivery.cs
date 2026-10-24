@@ -55,7 +55,7 @@ public sealed partial class LogisterClient
         var id = eventId ?? Guid.NewGuid();
         var capturedAt = occurredAt ?? options?.OccurredAt ?? DateTimeOffset.UtcNow;
         var payload = new IngestEnvelope(new IngestEventPayload(
-            EventType: eventType, Level: level, Message: message, Fingerprint: fingerprint ?? options?.Fingerprint,
+            EventType: eventType, Level: level, Message: _sanitizer.ScrubString(message), Fingerprint: fingerprint ?? options?.Fingerprint,
             OccurredAt: NormalizeTimestamp(capturedAt),
             Context: BuildContext(context ?? options?.Context, options?.Environment, options?.Release, options?.TraceId,
                 options?.RequestId, options?.SessionId, options?.UserId),
@@ -146,7 +146,7 @@ public sealed partial class LogisterClient
         var retry = path == IngestPath || path == IngestPath + "/batch";
         var policy = _options.RetryPolicy;
         var started = startedTimestamp ?? Stopwatch.GetTimestamp();
-        var uri = new Uri(_options.BaseUrl, path);
+        var uri = new Uri(_baseUrl, path);
         var apiKey = _options.ApiKey;
         var userAgent = _options.UserAgent;
         var attempts = retry ? policy.MaximumAttempts : 1;
@@ -156,7 +156,10 @@ public sealed partial class LogisterClient
             var remaining = policy.TotalTimeout - Stopwatch.GetElapsedTime(started);
             if (retry && remaining <= TimeSpan.Zero) throw new TimeoutException("Ingestion retry deadline exhausted.");
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            if (retry) deadline.CancelAfter(remaining);
+            // Every attempt is bounded by the client timeout even when the caller supplied its own HttpClient.
+            var attemptTimeout = _options.Timeout > TimeSpan.Zero ? _options.Timeout : Timeout.InfiniteTimeSpan;
+            if (retry && (attemptTimeout == Timeout.InfiniteTimeSpan || remaining < attemptTimeout)) attemptTimeout = remaining;
+            if (attemptTimeout != Timeout.InfiniteTimeSpan) deadline.CancelAfter(ClampTimeout(attemptTimeout));
             using var request = new HttpRequestMessage(HttpMethod.Post, uri);
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
             request.Headers.TryAddWithoutValidation("User-Agent", userAgent);
@@ -169,7 +172,10 @@ public sealed partial class LogisterClient
             }
             Exception failure;
             var retryable = true;
-            var delaySeconds = Math.Min(policy.BaseDelay.TotalSeconds * Math.Pow(2, attempt), policy.MaximumDelay.TotalSeconds);
+            // Exponential backoff with ±50% jitter so many clients do not retry in lockstep.
+            var delaySeconds = Math.Min(
+                policy.BaseDelay.TotalSeconds * Math.Pow(2, attempt) * (0.5 + Random.Shared.NextDouble()),
+                policy.MaximumDelay.TotalSeconds);
             try
             {
                 using var response = await _httpClient.SendAsync(request, deadline.Token).ConfigureAwait(false);
@@ -197,6 +203,9 @@ public sealed partial class LogisterClient
         }
         throw new InvalidOperationException("Unreachable delivery state.");
     }
+
+    private static TimeSpan ClampTimeout(TimeSpan timeout) =>
+        timeout > TimeSpan.FromMilliseconds(int.MaxValue - 1) ? TimeSpan.FromMilliseconds(int.MaxValue - 1) : timeout;
 
     private static LogisterResponse ParseResponse(string body)
     {

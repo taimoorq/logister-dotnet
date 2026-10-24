@@ -9,24 +9,29 @@ public sealed class LogisterRequestTransactionMiddleware
     private readonly RequestDelegate _next;
     private readonly LogisterClient _client;
     private readonly LogisterAspNetCoreOptions _options;
+    private readonly LogisterEventQueue _queue;
     private readonly ILogger<LogisterRequestTransactionMiddleware> _logger;
+    private readonly LogisterValueSanitizer _sanitizer;
 
     public LogisterRequestTransactionMiddleware(
         RequestDelegate next,
         LogisterClient client,
         LogisterAspNetCoreOptions options,
+        LogisterEventQueue queue,
         ILogger<LogisterRequestTransactionMiddleware> logger)
     {
         _next = next;
         _client = client;
         _options = options;
+        _queue = queue;
         _logger = logger;
+        _sanitizer = new LogisterValueSanitizer(options.Client.RedactKeys);
     }
 
     public async Task InvokeAsync(HttpContext context)
     {
         using var traceScope = new LogisterRequestScope(context.TraceIdentifier, context.Request.Headers["traceparent"].ToString());
-        if (!_options.CaptureRequestTransactions && !_options.CaptureRequestSpans)
+        if ((!_options.CaptureRequestTransactions && !_options.CaptureRequestSpans) || !Sampled())
         {
             await _next(context);
             return;
@@ -48,65 +53,75 @@ public sealed class LogisterRequestTransactionMiddleware
             stopwatch.Stop();
             if (_options.CaptureRequestTransactions)
             {
-                await CaptureTransactionAsync(context, stopwatch.Elapsed.TotalMilliseconds, failed);
+                CaptureTransaction(context, stopwatch.Elapsed.TotalMilliseconds, failed);
             }
 
             if (_options.CaptureRequestSpans)
             {
-                await CaptureSpanAsync(context, stopwatch.Elapsed.TotalMilliseconds, failed);
+                CaptureSpan(context, stopwatch.Elapsed.TotalMilliseconds, failed);
             }
         }
     }
 
-    private async Task CaptureTransactionAsync(HttpContext context, double durationMs, bool failed)
+    private bool Sampled()
+    {
+        var rate = _options.TransactionSampleRate;
+        return rate >= 1 || (rate > 0 && Random.Shared.NextDouble() < rate);
+    }
+
+    private void CaptureTransaction(HttpContext context, double durationMs, bool failed)
     {
         try
         {
-            var transactionName = context.GetEndpoint()?.DisplayName ?? $"{context.Request.Method} {context.Request.Path}";
-            await _client.CaptureTransactionAsync(
-                transactionName,
+            Enqueue(_client.PrepareTransaction(
+                LogisterHttpContext.TransactionName(context, _sanitizer),
                 durationMs,
                 new CaptureOptions
                 {
                     Level = (failed || context.Response.StatusCode >= 500) ? "error" : "info",
-                    Context = LogisterHttpContext.BuildContext(context, _options, durationMs, failed ? 500 : null),
+                    Context = LogisterHttpContext.BuildContext(context, _options, durationMs, failed ? 500 : null, _sanitizer),
                     RequestId = context.TraceIdentifier,
                     TraceId = Activity.Current?.TraceId.ToString(),
                     UserId = context.User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
-                },
-                context.RequestAborted);
+                }), "transaction");
         }
         catch (Exception logisterError)
         {
-            _logger.LogDebug(logisterError, "Failed to send ASP.NET Core transaction to Logister.");
+            LogisterMiddlewareLog.Debug(_logger, logisterError, "Failed to capture ASP.NET Core transaction for Logister.");
         }
     }
 
-    private async Task CaptureSpanAsync(HttpContext context, double durationMs, bool failed)
+    private void CaptureSpan(HttpContext context, double durationMs, bool failed)
     {
         try
         {
             var activity = Activity.Current;
-            var transactionName = context.GetEndpoint()?.DisplayName ?? $"{context.Request.Method} {context.Request.Path}";
-            await _client.CaptureSpanAsync(
-                transactionName,
+            Enqueue(_client.PrepareSpan(
+                LogisterHttpContext.TransactionName(context, _sanitizer),
                 durationMs,
                 new SpanOptions
                 {
                     Kind = "server",
                     Status = (failed || context.Response.StatusCode >= 500) ? "error" : "ok",
-                    Context = LogisterHttpContext.BuildContext(context, _options, durationMs, failed ? 500 : null),
+                    Context = LogisterHttpContext.BuildContext(context, _options, durationMs, failed ? 500 : null, _sanitizer),
                     RequestId = context.TraceIdentifier,
                     TraceId = activity?.TraceId.ToString() ?? context.TraceIdentifier,
                     SpanId = activity?.SpanId.ToString(),
                     ParentSpanId = LogisterTraceContext.Current?.ParentSpanId,
                     UserId = context.User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
-                },
-                context.RequestAborted);
+                }), "request span");
         }
         catch (Exception logisterError)
         {
-            _logger.LogDebug(logisterError, "Failed to send ASP.NET Core request span to Logister.");
+            LogisterMiddlewareLog.Debug(_logger, logisterError, "Failed to capture ASP.NET Core request span for Logister.");
+        }
+    }
+
+    private void Enqueue(PreparedEvent prepared, string kind)
+    {
+        if (!_queue.TryEnqueue(prepared))
+        {
+            LogisterMiddlewareLog.Debug(_logger, null, $"Logister event queue is full; dropped an ASP.NET Core {kind}.");
         }
     }
 }

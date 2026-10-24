@@ -6,11 +6,16 @@ namespace Logister;
 
 internal static class LogisterExceptionPayload
 {
+    private const int MaxInnerExceptions = 20;
+
     public static IDictionary<string, object?> FromException(
         Exception exception,
         bool includeData,
-        int depth = 0)
+        int depth = 0,
+        LogisterValueNormalizer.NormalizationState? state = null,
+        int valueDepth = 0)
     {
+        state ??= new LogisterValueNormalizer.NormalizationState();
         var payload = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
         {
             ["class"] = exception.GetType().Name,
@@ -36,7 +41,7 @@ internal static class LogisterExceptionPayload
 
         if (includeData)
         {
-            var data = BuildData(exception.Data);
+            var data = BuildData(exception, state, valueDepth);
             if (data.Count > 0)
             {
                 payload["data"] = data;
@@ -45,14 +50,15 @@ internal static class LogisterExceptionPayload
 
         if (exception.InnerException is not null && depth < 3)
         {
-            payload["inner_exception"] = FromException(exception.InnerException, includeData, depth + 1);
+            payload["inner_exception"] = FromException(exception.InnerException, includeData, depth + 1, state, valueDepth + 1);
             payload["cause"] = payload["inner_exception"];
         }
 
         if (exception is AggregateException aggregateException && depth < 3)
         {
             var innerExceptions = aggregateException.InnerExceptions
-                .Select(inner => FromException(inner, includeData, depth + 1))
+                .Take(MaxInnerExceptions)
+                .Select(inner => FromException(inner, includeData, depth + 1, state, valueDepth + 1))
                 .ToArray();
 
             if (innerExceptions.Length > 0)
@@ -111,19 +117,40 @@ internal static class LogisterExceptionPayload
             .ToList() ?? [];
     }
 
-    private static IDictionary<string, object?> BuildData(IDictionary data)
+    private static IDictionary<string, object?> BuildData(
+        Exception exception,
+        LogisterValueNormalizer.NormalizationState state,
+        int valueDepth)
     {
         var result = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (DictionaryEntry entry in data)
+        // Mark the exception active so a value in its own Data that refers back to it is reported as circular.
+        var entered = state.Enter(exception);
+        try
         {
-            var key = entry.Key?.ToString();
-            if (string.IsNullOrWhiteSpace(key))
+            foreach (DictionaryEntry entry in exception.Data)
             {
-                continue;
-            }
+                if (result.Count == LogisterValueNormalizer.MaxCollectionItems)
+                {
+                    result["_truncated"] = true;
+                    break;
+                }
 
-            result[key] = LogisterValueNormalizer.Normalize(entry.Value);
+                var key = entry.Key is string text ? text : LogisterValueNormalizer.SafeToString(entry.Key);
+                if (string.IsNullOrWhiteSpace(key))
+                {
+                    continue;
+                }
+
+                result[key] = LogisterValueNormalizer.Normalize(entry.Value, state, valueDepth + 1);
+            }
+        }
+        catch (Exception)
+        {
+            result["_unreadable"] = true;
+        }
+        finally
+        {
+            if (entered) state.Exit(exception);
         }
 
         return result;

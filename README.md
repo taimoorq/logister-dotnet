@@ -44,6 +44,8 @@ await client.CaptureExceptionAsync(
     });
 ```
 
+`BaseUrl` has no default: set it to your Logister instance. The client throws `LogisterConfigurationException` when the base URL is missing or invalid, and rejects `http://` unless the host is loopback (`localhost`, `127.0.0.1`, `::1`) or you set `AllowInsecureHttp = true` (`LOGISTER_ALLOW_INSECURE_HTTP=true`).
+
 Open the project inbox and confirm that **README test error** appears. A `401` response usually means the API key or base URL is wrong; use the [.NET integration guide](https://logister.org/docs/integrations/dotnet/) for the complete setup and troubleshooting path.
 
 ## Package Links
@@ -104,10 +106,17 @@ Add configuration:
     "CaptureRequestTransactions": true,
     "CaptureRequestSpans": true,
     "CaptureRequestHeaders": true,
-    "CaptureRequestCookies": false
+    "CaptureRequestCookies": false,
+    "CaptureClientIp": false,
+    "TransactionSampleRate": 0.2,
+    "QueueCapacity": 1000,
+    "RedactKeys": [ "tenant_key" ],
+    "AllowedRequestCookieNames": [ "theme" ]
   }
 }
 ```
+
+`Logister:BaseUrl` is required. An invalid value throws `LogisterConfigurationException` from `AddLogister`; a missing one throws when the host starts.
 
 For local development, prefer user secrets or environment variables for the real token:
 
@@ -127,7 +136,9 @@ builder.Services.AddLogister(builder.Configuration, options =>
 {
     options.Client.DefaultContext["service"] = "checkout-web";
     options.CaptureRequestCookies = true;
+    options.AllowedRequestCookieNames.Add("theme");
     options.SensitiveRequestCookieNames.Add("checkout_auth");
+    options.SensitiveRequestHeaderNames.Add("X-Tenant-Signature");
 });
 
 var app = builder.Build();
@@ -138,7 +149,15 @@ app.UseLogisterRequestTransactions();
 app.Run();
 ```
 
-Cookie capture is disabled by default because cookie values often contain authentication or session material. When enabled, common ASP.NET Core auth and session cookie names are redacted automatically. Add application-specific cookie names to `SensitiveRequestCookieNames` when you want the cookie name to appear in Logister without storing its value.
+The middleware never waits for Logister. Each exception, transaction or span is prepared on the request thread and placed on a bounded in-memory queue (`QueueCapacity`, default 1,000). A hosted service registered by `AddLogister` sends queued events in batches of up to 100 through `SendEventsAsync`, and keeps sending for up to `ShutdownFlushTimeout` (default 5 seconds) when the host stops. When the queue is full, new events are dropped and counted in `LogisterEventQueue.DroppedCount`. Capture and delivery failures are logged at debug level and never replace your application's exception or response.
+
+`TransactionSampleRate` (0–1, default 1) controls the fraction of requests whose transaction and span are reported. Exceptions are always reported.
+
+Cookie capture is disabled by default because cookie values often contain authentication or session material. When enabled, cookie names are recorded but every value is `[REDACTED]` unless the name is in `AllowedRequestCookieNames`. Cookies that look like authentication, session or antiforgery cookies stay redacted even when allowlisted: `.AspNetCore.*` and their chunks (`.AspNetCore.CookiesC1`, `C2`, …), `__Host-*`, `__Secure-*`, `XSRF-TOKEN`, names matching the shared redaction rule, and names in `SensitiveRequestCookieNames` (including their chunks).
+
+Header capture records header values except for sensitive headers, whose values are `[REDACTED]`. A header is sensitive when its name matches the shared redaction rule (for example `Authorization`, `Cookie`, `X-Api-Key`, `X-CSRF-Token`), is one of the platform credential headers (`x-functions-key`, `x-ms-client-principal*`, `x-ms-token-*`, `x-goog-iap-jwt-assertion`, `cf-access-jwt-assertion`, `x-amzn-oidc-*`, webhook signature headers), or is listed in `SensitiveRequestHeaderNames`.
+
+`client_ip` and forwarding headers such as `X-Forwarded-For`, `Forwarded`, `X-Real-IP` and `CF-Connecting-IP` are only captured when `CaptureClientIp` is `true`.
 
 ## Direct client
 
@@ -196,6 +215,40 @@ await client.CheckInAsync("nightly-import", "ok", new CheckInOptions
 ```
 
 `CaptureOptions` supports per-event `Environment`, `Release`, `TraceId`, `RequestId`, `SessionId`, and `UserId` for errors, logs, metrics, and transactions. `MetricOptions` adds `Unit`; `SpanOptions` adds `SpanId`, `ParentSpanId`, `Kind`, `Status`, `StartedAt`, and `EndedAt`; and `CheckInOptions` supports `Release`, `DurationMs`, `ExpectedIntervalSeconds`, `TraceId`, and `RequestId` so monitor records line up with the Logister API.
+
+## Privacy and redaction
+
+Logister redacts captured data before it leaves your process, using the same default rules as the other Logister SDKs.
+
+- **Sensitive keys.** A key is sensitive when, after lowercasing and removing every non-alphanumeric character, it equals one of `password`, `passwd`, `pwd`, `secret`, `token`, `apikey`, `authorization`, `proxyauthorization`, `cookie`, `setcookie`, `sessiontoken`, `sessionkey`, `credential`, `credentials`, `privatekey`, `clientsecret`, `accesstoken`, `refreshtoken`, `idtoken`, `authtoken`, `xapikey`, `xauthtoken`, `xaccesstoken`, `xcsrftoken`, `xxsrftoken`, `signature`, `ssn`, `creditcard`, `cardnumber` or `cvv`, or contains `token`, `secret`, `password`, `passwd`, `apikey`, `authorization`, `credential` or `cookie`. Its value becomes `[REDACTED]`.
+- **Sensitive values.** Strings are scrubbed for `Bearer …` and `Basic …` credentials, JWT-shaped tokens, `lgst_…` keys and passwords in URLs (`scheme://user:[REDACTED]@host`).
+- **URLs and query strings.** Captured URLs, query strings and referers keep scheme, host and path, drop the fragment and redact the values of sensitive query parameters, for example `/callback?state=1&access_token=[REDACTED]`.
+- **Where it applies.** Context and `DefaultContext`, the event message, exception messages, `Exception.Data`, request URL, path, query string, route values, headers and cookies. The SDK's own identifiers (`uuid`, `trace_id`, `span_id`, `parent_span_id`, `request_id`, `session_id`) are never rewritten.
+
+Add your own keys with `LogisterOptions.RedactKeys`, the `Logister:RedactKeys` setting (array or comma-separated string) or `LOGISTER_REDACT_KEYS`. Entries are normalized the same way and must match exactly. Configure them before the client is created. The default list does not include generic names such as OAuth `code` or Azure SAS `sig`; add them if your URLs carry such values:
+
+```csharp
+var options = LogisterOptions.FromEnvironment();
+options.RedactKeys.Add("code");
+options.RedactKeys.Add("sig");
+```
+
+Other privacy-relevant defaults:
+
+- `client_ip` and forwarding headers are opt-in (`CaptureClientIp`).
+- `machine_name` and `process_id` are opt-in (`LogisterOptions.CaptureHostIdentity`, `Logister:CaptureHostIdentity`).
+- Stack frames include the file paths recorded in your PDBs, which can be absolute build-machine paths such as `<build-root>/src/app/Checkout.cs`, where the build root can include a user name. Logister uses them, together with the project's runtime root, to link frames to GitHub source. To avoid publishing build-machine paths, build your app with `<ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>` (paths are then recorded under the deterministic `/_/` root) or a `<PathMap>`, and set the matching runtime root in Logister.
+- `CaptureExceptionData` (default `true`) controls whether `Exception.Data` is sent at all.
+
+Captured values are also bounded: nesting deeper than 12 levels becomes `[MaxDepth]`, collections keep their first 200 items, reference cycles become `[Circular]`, and `IQueryable` or lazy `IEnumerable` values are reported by type name or `ToString()` instead of being enumerated.
+
+## Upgrading to 0.5.0
+
+- Set `BaseUrl` explicitly. There is no longer a `https://logister.org` default, and invalid values throw `LogisterConfigurationException` instead of being ignored.
+- Use `https://`, or a loopback `http://` URL for local development. Set `AllowInsecureHttp = true` only for trusted internal networks.
+- ASP.NET Core events are now sent in the background. If you construct `LogisterExceptionMiddleware` or `LogisterRequestTransactionMiddleware` yourself, pass a `LogisterEventQueue`; `AddLogister` registers the queue and the delivery service for you.
+- Cookie values are redacted unless allowlisted. Move cookies you want to see to `AllowedRequestCookieNames`.
+- Enable `CaptureClientIp` or `CaptureHostIdentity` if you relied on `client_ip`, `machine_name` or `process_id`.
 
 ## Using project Insights
 
@@ -318,7 +371,9 @@ var client = new LogisterClient(LogisterOptions.FromEnvironment());
 Supported variables:
 
 - `LOGISTER_API_KEY`
-- `LOGISTER_BASE_URL`
+- `LOGISTER_BASE_URL` (required; must be an absolute URL)
+- `LOGISTER_ALLOW_INSECURE_HTTP`
+- `LOGISTER_REDACT_KEYS` (comma-separated)
 - `LOGISTER_ENVIRONMENT`
 - `LOGISTER_RELEASE`
 - `LOGISTER_REPOSITORY`
@@ -399,8 +454,10 @@ foreach (var result in results)
 
 Prepared events retain serialized context, UUID and capture time across retries and
 explicit replay. Ingestion retries transient network/HTTP failures up to three times;
-`LogisterOptions.RetryPolicy` controls the attempt limit, capped Retry-After/backoff,
-and the default 15-second total deadline. One batch call shares that deadline across
+`LogisterOptions.RetryPolicy` controls the attempt limit, capped Retry-After/backoff
+(exponential with ±50% jitter), and the default 15-second total deadline. Each HTTP
+attempt, including check-ins and deployments, is also bounded by `LogisterOptions.Timeout`
+(default 5 seconds), even when you supply your own `HttpClient`. One batch call shares that deadline across
 all chunks, splits and fallback. `maximumAttempts: 1` disables retries.
 
 Batches accept at most 1,000 prepared events and send at most 100 per request. Each
