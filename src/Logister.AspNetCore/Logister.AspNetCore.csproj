@@ -12,7 +12,7 @@
     <Nullable>enable</Nullable>
     <IsPackable>true</IsPackable>
     <PackageId>Logister.AspNetCore</PackageId>
-    <Version>0.4.0</Version>
+    <Version>0.5.0</Version>
     <Authors>Taimoor Qureshi</Authors>
     <Company>Logister</Company>
     <Description>ASP.NET Core middleware and service registration for Logister.</Description>
@@ -22,6 +22,16 @@
     <PackageProjectUrl>https://docs.logister.org/integrations/dotnet/</PackageProjectUrl>
     <RepositoryUrl>https://github.com/taimoorq/logister-dotnet</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <DebugType>embedded</DebugType>
+    <EnablePackageValidation>true</EnablePackageValidation>
   </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Logister.Tests" />
+  </ItemGroup>
 
 </Project>

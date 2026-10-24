@@ -14,6 +14,17 @@ telemetry, customer data, or local package-source credentials.
 - Keep NuGet and GitHub Actions Dependabot updates enabled. Pin Actions to full
   commit SHAs and retain a readable version comment.
 
+## Redaction and capture safety
+
+- `src/Logister/LogisterValueSanitizer.cs` implements the shared Logister redaction
+  spec used by every SDK (key list, contains-matching, Bearer/Basic/JWT/`lgst_`
+  value patterns, URL query redaction). Change it only together with the other
+  SDKs, and keep `README.md` "Privacy and redaction" in sync.
+- `LogisterValueNormalizer` must stay bounded (depth, item budget, cycle guard)
+  and must never enumerate anything that is not a materialized collection.
+- ASP.NET Core middleware must never await delivery or let capture errors escape;
+  it enqueues prepared events on `LogisterEventQueue`.
+
 ## Verification
 
 Run before handoff or release:
